@@ -79,6 +79,46 @@ if grep -qw gpu_diag_autorun=1 /proc/cmdline; then
     /gpu-diag.sh
 fi
 
+root_spec=""
+root_fstype="ext4"
+for arg in $(cat /proc/cmdline); do
+    case "$arg" in
+        root=*) root_spec="${arg#root=}" ;;
+        rootfstype=*) root_fstype="${arg#rootfstype=}" ;;
+    esac
+done
+
+if [ -n "$root_spec" ]; then
+    echo
+    echo "Root filesystem requested: $root_spec ($root_fstype)"
+    mkdir -p /newroot
+
+    mounted=0
+    tries=30
+    while [ "$tries" -gt 0 ]; do
+        if mount -t "$root_fstype" -o rw "$root_spec" /newroot 2>/dev/null; then
+            mounted=1
+            break
+        fi
+        sleep 1
+        tries=$((tries - 1))
+    done
+
+    if [ "$mounted" -eq 1 ] && [ -x /newroot/sbin/init ]; then
+        echo "Mounted root filesystem; switching to /sbin/init"
+        mkdir -p /newroot/dev /newroot/proc /newroot/sys /newroot/run
+        mount --move /dev /newroot/dev
+        mount --move /proc /newroot/proc
+        mount --move /sys /newroot/sys
+        mount --move /run /newroot/run
+        cd /
+        exec switch_root /newroot /sbin/init
+    fi
+
+    echo "Could not mount $root_spec or /sbin/init is missing"
+    umount /newroot 2>/dev/null || true
+fi
+
 echo
 echo "Entering BusyBox shell..."
 

@@ -21,6 +21,7 @@ Microsoft **Surface Laptop for Business 13in 1st Ed with Snapdragon**
 | Adreno GPU / MSM DRM | ✅ |
 | 内蔵eDP 1920×1280 | ✅ |
 | PWMバックライト | ✅ |
+| Ubuntu ARM64 rootfs（USB） | 🚧 実装中 |
 | UFS内蔵ストレージ | 🚧 無効 |
 | Wi-Fi / Bluetooth | 未検証 |
 | バッテリー・充電 | 未検証 |
@@ -178,6 +179,11 @@ USB
     ├── initramfs.cpio.gz
     └── surface-laptop-13.dtb
 ```
+
+Ubuntu ARM64をUSB上のext4 rootfsから起動する手順は
+[docs/ubuntu-usb.md](docs/ubuntu-usb.md) にあります。GRUBにはBusyBox検証用と
+Ubuntu用の2つの項目が入り、Ubuntu項目は`LABEL=UBUNTU_ROOT`を自動的に
+`switch_root`します。
 
 ## 起動
 

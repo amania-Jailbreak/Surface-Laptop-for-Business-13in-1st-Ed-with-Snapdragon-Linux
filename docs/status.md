@@ -17,6 +17,7 @@ Tested with Linux commit `fc02acf6ac0ccde0c805c2daa9148683cdd01ba8`
 | GPU | Working | MSM DRM render node and ioctl smoke test |
 | Internal eDP | Working | 1920×1280 panel through DP3 |
 | Backlight | Working | PMK8550 PWM, 200 Hz |
+| Ubuntu ARM64 rootfs on USB | Experimental | `LABEL=UBUNTU_ROOT` + BusyBox `switch_root` |
 | UFS | Disabled | Board-specific validation still required |
 | Wi-Fi/Bluetooth | Not tested | Firmware and PCIe path not integrated |
 | Audio | Disabled | Speaker protection must be validated first |
