@@ -23,6 +23,10 @@ command -v fakeroot >/dev/null || {
     echo "fakeroot is required to preserve root ownership in the tar archive" >&2
     exit 1
 }
+command -v rsync >/dev/null || {
+    echo "rsync is required to merge the ISO layers" >&2
+    exit 1
+}
 
 iso="$(cd "$(dirname "$iso")" && pwd)/$(basename "$iso")"
 mkdir -p "$(dirname "$output")"
@@ -47,8 +51,10 @@ echo "Unpacking Ubuntu rootfs and creating $output"
 fakeroot sh -c '
     set -e
     unsquashfs -quiet -d "$1/rootfs" "$1/minimal.squashfs"
-    unsquashfs -quiet -f -d "$1/rootfs" "$1/minimal.standard.squashfs"
-    unsquashfs -quiet -f -d "$1/rootfs" "$1/minimal.standard.live.squashfs"
+    unsquashfs -quiet -d "$1/standard" "$1/minimal.standard.squashfs"
+    unsquashfs -quiet -d "$1/live" "$1/minimal.standard.live.squashfs"
+    rsync -aH --numeric-ids "$1/standard/." "$1/rootfs/"
+    rsync -aH --numeric-ids "$1/live/." "$1/rootfs/"
     tar --numeric-owner --xattrs --acls -cpf "$2" -C "$1/rootfs" .
 ' sh "$work_dir" "$output"
 
