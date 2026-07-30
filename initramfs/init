@@ -1,0 +1,85 @@
+#!/bin/sh
+# SPDX-License-Identifier: MIT
+
+export PATH=/bin:/sbin:/usr/bin:/usr/sbin
+export HOME=/
+export TERM=linux
+export PS1='surface-busybox # '
+
+mkdir -p /dev /proc /sys /run /tmp /mnt /sys/kernel/debug
+
+mount -t devtmpfs devtmpfs /dev 2>/dev/null || true
+mount -t proc proc /proc 2>/dev/null || true
+mount -t sysfs sysfs /sys 2>/dev/null || true
+mount -t tmpfs tmpfs /run 2>/dev/null || true
+mount -t debugfs debugfs /sys/kernel/debug 2>/dev/null || true
+
+echo
+echo "=========================================="
+echo " Surface Laptop 13 X1P42100 bring-up"
+echo "=========================================="
+echo
+
+echo "Waiting for normal driver probing..."
+sleep 5
+
+echo
+echo "[Important bindings]"
+for dev in \
+    interconnect-1 \
+    firmware:scm \
+    17500000.rsc:regulators-4 \
+    17500000.rsc:regulators-7 \
+    17500000.rsc:regulators-1 \
+    17500000.rsc:regulators-3 \
+    88e1000.phy \
+    88e2000.phy \
+    88e3000.phy \
+    88e5000.phy \
+    a400000.usb
+do
+    printf "%-38s " "$dev"
+
+    if [ -L "/sys/bus/platform/devices/$dev/driver" ]; then
+        basename "$(readlink -f "/sys/bus/platform/devices/$dev/driver")"
+    else
+        echo "UNBOUND"
+    fi
+done
+
+echo
+echo "[Deferred devices]"
+cat /sys/kernel/debug/devices_deferred 2>/dev/null || true
+
+echo
+echo "[USB devices]"
+for dev in /sys/bus/usb/devices/*; do
+    [ -r "$dev/idVendor" ] || continue
+
+    echo "$(basename "$dev"): \
+$(cat "$dev/idVendor"):$(cat "$dev/idProduct") \
+$(cat "$dev/product" 2>/dev/null)"
+done
+
+echo
+echo "[Input devices]"
+cat /proc/bus/input/devices 2>/dev/null || true
+
+echo
+echo "[Relevant dmesg]"
+dmesg |
+    grep -Ei \
+    'firmware:scm|interconnect|17500000|88e[1235]000|a400000|dwc3|xhci|usb|regulator|defer|failed|error' |
+    tail -n 160
+
+if grep -qw gpu_diag_autorun=1 /proc/cmdline; then
+    echo
+    echo "Running automatic GPU diagnostic..."
+    sleep 5
+    /gpu-diag.sh
+fi
+
+echo
+echo "Entering BusyBox shell..."
+
+exec setsid cttyhack /bin/sh

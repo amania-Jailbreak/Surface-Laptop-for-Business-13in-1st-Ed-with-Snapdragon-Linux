@@ -1,0 +1,270 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Initial Device Tree support for:
+ * Microsoft Surface Laptop for Business 13in 1st Ed with Snapdragon
+ * System SKU suffix: 2095
+ *
+ * Based on the purwa SoC, hamoa PMIC topology, firmware ACPI resources,
+ * and comparison with other Microsoft X1-family machines.
+ */
+
+/dts-v1/;
+
+#include <dt-bindings/gpio/gpio.h>
+#include <dt-bindings/regulator/qcom,rpmh-regulator.h>
+
+#include "purwa.dtsi"
+#include "hamoa-pmics.dtsi"
+
+/ {
+	model = "Microsoft Surface Laptop 13-inch 1st Edition with Snapdragon";
+	compatible = "microsoft,surface-laptop-13-2095", "qcom,x1p42100";
+	chassis-type = "laptop";
+
+	vph_pwr: regulator-vph-pwr {
+		compatible = "regulator-fixed";
+		regulator-name = "vph_pwr";
+		regulator-min-microvolt = <3700000>;
+		regulator-max-microvolt = <3700000>;
+		regulator-always-on;
+		regulator-boot-on;
+	};
+
+	backlight: backlight {
+		compatible = "pwm-backlight";
+		pwms = <&pmk8550_pwm 0 5000000>;
+		power-supply = <&vreg_edp_3p3>;
+
+		pinctrl-0 = <&edp_bl_pwm>;
+		pinctrl-names = "default";
+	};
+
+	/*
+	 * ACPI TDPR writes 2 to TLMM GPIO29's status register
+	 * (0xf100000 + 29 * 0x1000 + 4), then waits 150 ms.
+	 */
+	vreg_edp_3p3: regulator-edp-3p3 {
+		compatible = "regulator-fixed";
+		regulator-name = "VREG_EDP_3P3";
+		regulator-min-microvolt = <3300000>;
+		regulator-max-microvolt = <3300000>;
+
+		gpio = <&tlmm 29 GPIO_ACTIVE_HIGH>;
+		enable-active-high;
+		startup-delay-us = <150000>;
+
+		pinctrl-0 = <&edp_reg_en>;
+		pinctrl-names = "default";
+	};
+
+	aliases {
+		serial0 = &uart21;
+	};
+
+	chosen {
+		stdout-path = "serial0:115200n8";
+	};
+};
+
+/* ACPI UARD: 0x00894000, GSI 845 -> GIC_SPI 813. */
+&uart21 {
+	compatible = "qcom,geni-debug-uart";
+	status = "okay";
+};
+
+&ufs_mem_phy {
+	status = "disabled";
+};
+
+&ufs_mem_hc {
+	status = "disabled";
+};
+
+&gpu {
+	status = "okay";
+};
+
+&gpu_zap_shader {
+	firmware-name = "qcom/x1p42100/Microsoft/Surface12/qcdxkmsucpurwa.mbn";
+};
+
+&usb_2_hsphy {
+	status = "disabled";
+};
+
+&usb_2 {
+	status = "disabled";
+};
+
+&usb_mp_hsphy0 {
+	vdd-supply = <&vreg_l2e>;
+	vdda12-supply = <&vreg_l2j>;
+	status = "okay";
+};
+
+&usb_mp_hsphy1 {
+	vdd-supply = <&vreg_l2e>;
+	vdda12-supply = <&vreg_l2j>;
+	status = "okay";
+};
+
+&usb_mp_qmpphy0 {
+	vdda-phy-supply = <&vreg_l3e>;
+	vdda-pll-supply = <&vreg_l3c>;
+	status = "okay";
+};
+
+&usb_mp_qmpphy1 {
+	vdda-phy-supply = <&vreg_l3e>;
+	vdda-pll-supply = <&vreg_l3c>;
+	status = "okay";
+};
+
+&usb_mp {
+	status = "okay";
+};
+
+/*
+ * Minimal RPMh regulator subset needed by usb_mp PHYs.
+ * Values are based on the upstream Microsoft Romulus topology.
+ */
+&apps_rsc {
+	regulators-1 {
+		compatible = "qcom,pm8550ve-rpmh-regulators";
+		qcom,pmic-id = "c";
+
+		vdd-l3-supply = <&vreg_s1f>;
+
+		vreg_l3c: ldo3 {
+			regulator-name = "vreg_l3c";
+			regulator-min-microvolt = <912000>;
+			regulator-max-microvolt = <920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-3 {
+		compatible = "qcom,pmc8380-rpmh-regulators";
+		qcom,pmic-id = "e";
+
+		vdd-l2-supply = <&vreg_s1f>;
+		vdd-l3-supply = <&vreg_s5j>;
+
+		vreg_l2e: ldo2 {
+			regulator-name = "vreg_l2e";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l3e: ldo3 {
+			regulator-name = "vreg_l3e";
+			regulator-min-microvolt = <1200000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-4 {
+		compatible = "qcom,pmc8380-rpmh-regulators";
+		qcom,pmic-id = "f";
+
+		vdd-s1-supply = <&vph_pwr>;
+
+		vreg_s1f: smps1 {
+			regulator-name = "vreg_s1f";
+			regulator-min-microvolt = <700000>;
+			regulator-max-microvolt = <1100000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+
+	regulators-7 {
+		compatible = "qcom,pm8550ve-rpmh-regulators";
+		qcom,pmic-id = "j";
+
+		vdd-l2-supply = <&vreg_s5j>;
+		vdd-s5-supply = <&vph_pwr>;
+
+		vreg_s5j: smps5 {
+			regulator-name = "vreg_s5j";
+			regulator-min-microvolt = <1256000>;
+			regulator-max-microvolt = <1304000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l2j: ldo2 {
+			regulator-name = "vreg_l2j";
+			regulator-min-microvolt = <1256000>;
+			regulator-max-microvolt = <1256000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l3j: ldo3 {
+			regulator-name = "vreg_l3j";
+			regulator-min-microvolt = <880000>;
+			regulator-max-microvolt = <920000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+	};
+};
+
+&mdss {
+	status = "okay";
+};
+
+&mdss_dp3 {
+	/delete-property/ #sound-dai-cells;
+
+	pinctrl-0 = <&edp0_hpd_default>;
+	pinctrl-names = "default";
+	status = "okay";
+
+	aux-bus {
+		panel {
+			compatible = "edp-panel";
+			backlight = <&backlight>;
+			power-supply = <&vreg_edp_3p3>;
+
+			port {
+				edp_panel_in: endpoint {
+					remote-endpoint = <&mdss_dp3_out>;
+				};
+			};
+		};
+	};
+};
+
+&mdss_dp3_out {
+	data-lanes = <0 1 2 3>;
+	link-frequencies = /bits/ 64 <1620000000 2700000000 5400000000 8100000000>;
+	remote-endpoint = <&edp_panel_in>;
+};
+
+&mdss_dp3_phy {
+	vdda-phy-supply = <&vreg_l3j>;
+	vdda-pll-supply = <&vreg_l2j>;
+	status = "okay";
+};
+
+&pmk8550_pwm {
+	status = "okay";
+};
+
+&pmk8550_gpios {
+	edp_bl_pwm: edp-bl-pwm-state {
+		pins = "gpio5";
+		function = "func3";
+	};
+};
+
+&tlmm {
+	gpio-reserved-ranges = <34 2>, <44 4>;
+
+	edp_reg_en: edp-reg-en-state {
+		pins = "gpio29";
+		function = "gpio";
+		drive-strength = <16>;
+		bias-disable;
+	};
+};
