@@ -42,12 +42,24 @@ sudo umount /mnt/surface-efi
 Ubuntu Baseまたは同等のARM64 rootfsを用意し、ext4パーティションへ展開します。
 デスクトップ用ISOをそのままコピーする方式ではありません。
 
+手元のUbuntu Desktop ARM64 ISOから作る場合は、`squashfs-tools`、`fakeroot`、
+`7z`をホストへ入れて、次を実行します。ISO内のベース、Desktop追加、Live追加の
+3レイヤーを順番に重ねます。
+
+```bash
+./scripts/extract-ubuntu-rootfs.sh \
+  ../ubuntu-26.04-desktop-arm64.iso \
+  ./out/ubuntu-rootfs.tar
+```
+
+生成したtarballをext4パーティションへ展開します。
+
 ```bash
 sudo mkdir -p /mnt/ubuntu-root
 sudo mount "${USB}2" /mnt/ubuntu-root
 
-# 例: ダウンロードしたUbuntu Base ARM64 tarball
-sudo tar --numeric-owner -xpf ubuntu-base-arm64.tar.gz \
+# Ubuntu Desktop ARM64 ISOから生成したrootfs tarball
+sudo tar --numeric-owner -xpf out/ubuntu-rootfs.tar \
   -C /mnt/ubuntu-root
 
 sudo mkdir -p /mnt/ubuntu-root/etc

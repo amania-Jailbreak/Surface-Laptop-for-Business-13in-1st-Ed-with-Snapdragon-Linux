@@ -64,7 +64,8 @@ Surface Laptop 7の13.8/15インチ版やSurface Pro 12とは別機種です。
     ├── assemble-usb-tree.sh
     ├── build-grub-efi.sh
     ├── build-initramfs.sh
-    └── build-kernel.sh
+    ├── build-kernel.sh
+    └── extract-ubuntu-rootfs.sh
 ```
 
 カーネル、DTB、EFI、initramfs、ファームウェア、ACPIダンプなどの生成物は

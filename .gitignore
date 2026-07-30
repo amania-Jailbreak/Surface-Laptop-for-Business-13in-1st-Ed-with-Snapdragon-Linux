@@ -10,6 +10,7 @@ Image
 Image-*
 out/
 build/
+.work/
 rootfs/
 firmware/
 diagnostics/
