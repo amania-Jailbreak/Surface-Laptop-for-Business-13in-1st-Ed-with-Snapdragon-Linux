@@ -48,13 +48,43 @@ for layer in minimal minimal.standard minimal.standard.live; do
 done
 
 echo "Unpacking Ubuntu rootfs and creating $output"
-fakeroot sh -c '
+fakeroot bash -c '
     set -e
     unsquashfs -quiet -d "$1/rootfs" "$1/minimal.squashfs"
     unsquashfs -quiet -d "$1/standard" "$1/minimal.standard.squashfs"
     unsquashfs -quiet -d "$1/live" "$1/minimal.standard.live.squashfs"
-    rsync -aH --numeric-ids "$1/standard/." "$1/rootfs/"
-    rsync -aH --numeric-ids "$1/live/." "$1/rootfs/"
+
+    overlay_merge()
+    {
+        src="$1"
+        dst="$2"
+
+        # SquashFS layers can replace a file/symlink with a directory (or
+        # vice versa). Remove only those type-conflicting paths before rsync.
+        (cd "$src" && find . -mindepth 1 -type d -print0) |
+        while IFS= read -r -d "" path; do
+            rel="${path#./}"
+            target="$dst/$rel"
+            if { [ -e "$target" ] || [ -L "$target" ]; } &&
+               { [ ! -d "$target" ] || [ -L "$target" ]; }; then
+                rm -rf "$target"
+            fi
+        done
+
+        (cd "$src" && find . -mindepth 1 ! -type d -print0) |
+        while IFS= read -r -d "" path; do
+            rel="${path#./}"
+            target="$dst/$rel"
+            if [ -d "$target" ] && [ ! -L "$target" ]; then
+                rm -rf "$target"
+            fi
+        done
+
+        rsync -aH --numeric-ids "$src/." "$dst/"
+    }
+
+    overlay_merge "$1/standard" "$1/rootfs"
+    overlay_merge "$1/live" "$1/rootfs"
     tar --numeric-owner --xattrs --acls -cpf "$2" -C "$1/rootfs" .
 ' sh "$work_dir" "$output"
 
