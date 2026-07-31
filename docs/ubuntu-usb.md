@@ -1,7 +1,8 @@
 # Ubuntu ARM64をUSBから起動する
 
 既知の動作版BusyBoxを残したまま、同じUSB上のext4 rootfsへ切り替える手順です。
-内蔵UFSには書き込みません。
+内蔵UFSには書き込みません。実機ではGRUBが不安定だったため、Ubuntu Desktopは
+systemd-stub UKIから直接起動します。
 
 ## USBパーティション
 
@@ -77,6 +78,29 @@ rootfsには少なくとも次が必要です。
 /var
 ```
 
+## カーネル設定
+
+Ubuntu DesktopではGPU・内蔵画面用ドライバに加えて、Snapのマウントに使う
+SquashFS圧縮形式をカーネルへ組み込みます。
+
+```text
+CONFIG_DRM=y
+CONFIG_DRM_MSM=y
+CONFIG_DRM_MSM_DPU=y
+CONFIG_DRM_MSM_DP=y
+CONFIG_PHY_QCOM_EDP=y
+CONFIG_CLK_X1E80100_DISPCC=y
+CONFIG_CLK_X1E80100_GPUCC=y
+CONFIG_CLK_X1P42100_GPUCC=y
+CONFIG_SQUASHFS=y
+CONFIG_SQUASHFS_LZO=y
+CONFIG_SQUASHFS_XZ=y
+CONFIG_SQUASHFS_LZ4=y
+```
+
+起動に必要なドライバを`=m`にする場合は、対応するモジュールもinitramfsへ
+含める必要があります。初期bring-upでは`=y`を推奨します。
+
 ## カーネルとinitramfsの再生成
 
 追加したrootfs用設定を含むカーネルをビルドします。
@@ -95,11 +119,16 @@ export FIRMWARE_ROOT="$PWD/firmware"
   ./out/initramfs.cpio.gz
 ```
 
-EFIとUSBツリーを更新します。
+UKIを生成します。`linuxaa64.efi.stub`はARM64版systemd-boot-efiパッケージから
+取得できます。
 
 ```bash
-./scripts/build-grub-efi.sh \
-  /path/to/grub-arm64/usr/lib/grub/arm64-efi \
+./scripts/build-uki.sh \
+  /path/to/ukify \
+  /path/to/linuxaa64.efi.stub \
+  ./out/Image \
+  ./out/surface-laptop-13.dtb \
+  ./out/initramfs.cpio.gz \
   ./out/BOOTAA64.EFI
 
 ./scripts/assemble-usb-tree.sh \
@@ -110,13 +139,8 @@ EFIとUSBツリーを更新します。
   ./out/usb-root
 ```
 
-FAT32パーティションの内容を更新したら、GRUBで次を選びます。
-
-```text
-Surface Laptop 13 X1P42100 - Ubuntu ARM64 on USB
-```
-
-この項目は次の指定を使います。
+FAT32パーティションの`EFI/BOOT/BOOTAA64.EFI`を更新すると、UEFIから
+Ubuntu用UKIが直接起動します。既定では次の指定を使います。
 
 ```text
 root=LABEL=UBUNTU_ROOT rootfstype=ext4 rootwait rw
@@ -124,6 +148,9 @@ root=LABEL=UBUNTU_ROOT rootfstype=ext4 rootwait rw
 
 BusyBox initramfsがUSB rootfsを最大30秒待ち、`/sbin/init`へ切り替えます。
 失敗した場合は自動的にBusyBoxシェルへ戻るため、診断を続けられます。
+
+起動に成功するとGDMを経由してUbuntu 26.04 Desktopが内蔵eDPへ表示されます。
+GUIが表示されない場合でも、`Ctrl+Alt+F3`でTTYへ切り替えられることがあります。
 
 ## トラブルシュート
 

@@ -5,7 +5,8 @@ Microsoft **Surface Laptop for Business 13in 1st Ed with Snapdragon**
 初期サポートです。
 
 現在、8 CPUコア、GPU、内蔵eDP画面、PWMバックライト、USB、内蔵キーボード、
-タッチパッド、BusyBox initramfsまで実機で動作しています。
+タッチパッド、BusyBox initramfs、USB上のUbuntu 26.04 Desktop ARM64まで
+実機で動作しています。
 
 > This repository contains early Device Tree and bring-up tooling for the
 > Microsoft Surface Laptop 13-inch with Qualcomm X1P42100.
@@ -14,14 +15,15 @@ Microsoft **Surface Laptop for Business 13in 1st Ed with Snapdragon**
 
 | 機能 | 状態 |
 |---|---|
-| ARM64 UEFI / GRUB起動 | ✅ |
+| ARM64 UEFI / UKI直接起動 | ✅ |
+| ARM64 GRUB | ⚠️ 実機では不安定 |
 | CPU 8コア | ✅ |
 | USBホスト | ✅ |
 | 内蔵キーボード・タッチパッド | ✅ |
 | Adreno GPU / MSM DRM | ✅ |
 | 内蔵eDP 1920×1280 | ✅ |
 | PWMバックライト | ✅ |
-| Ubuntu ARM64 rootfs（USB） | 🚧 実装中 |
+| Ubuntu 26.04 Desktop ARM64（USB） | ✅ |
 | UFS内蔵ストレージ | 🚧 無効 |
 | Wi-Fi / Bluetooth | 未検証 |
 | バッテリー・充電 | 未検証 |
@@ -65,6 +67,7 @@ Surface Laptop 7の13.8/15インチ版やSurface Pro 12とは別機種です。
     ├── build-grub-efi.sh
     ├── build-initramfs.sh
     ├── build-kernel.sh
+    ├── build-uki.sh
     └── extract-ubuntu-rootfs.sh
 ```
 
@@ -77,8 +80,8 @@ Gitへ含めません。
   `fc02acf6ac0ccde0c805c2daa9148683cdd01ba8`
 - Kernel version: Linux 7.2-rc5 development tree
 - Cross compiler: `aarch64-linux-gnu-gcc`
-- Bootloader: GRUB `arm64-efi`
-- Test date: 2026-07-30
+- Boot method: systemd-stub UKI (`BOOTAA64.EFI`)
+- Test date: 2026-07-31
 
 新しいカーネルではDTSやKconfigシンボルの調整が必要になる場合があります。
 
@@ -94,7 +97,7 @@ sudo apt install -y \
   device-tree-compiler \
   gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu \
   libc6-dev-arm64-cross cpio gzip rsync \
-  grub-common grub2-common
+  grub-common grub2-common systemd-ukify
 ```
 
 カーネルソースを用意します。
@@ -147,7 +150,28 @@ export FIRMWARE_ROOT="$PWD/firmware"
   ./out/initramfs.cpio.gz
 ```
 
-### 4. ARM64 GRUB EFI
+### 4. ARM64 UKI（推奨）
+
+この機種ではGRUBの描画中やメニュー操作中にハードリセット・フリーズが
+発生したため、Ubuntu起動にはsystemd-stubによる直接UKIを使用します。
+
+ARM64版`linuxaa64.efi.stub`、カーネル、DTB、initramfsを1つの
+`BOOTAA64.EFI`へまとめます。
+
+```bash
+./scripts/build-uki.sh \
+  /path/to/ukify \
+  /path/to/linuxaa64.efi.stub \
+  ./out/Image \
+  ./out/surface-laptop-13.dtb \
+  ./out/initramfs.cpio.gz \
+  ./out/BOOTAA64.EFI
+```
+
+既定のカーネルコマンドラインはUSB上の
+`LABEL=UBUNTU_ROOT`をroot filesystemとして使用します。
+
+### 5. ARM64 GRUB EFI（BusyBox診断用・非推奨）
 
 x86-64ホストではARM64版GRUBモジュールを展開し、そのディレクトリを指定します。
 
@@ -159,7 +183,7 @@ x86-64ホストではARM64版GRUBモジュールを展開し、そのディレ�
 
 成功時、`file`はAArch64 EFI applicationと表示します。
 
-### 5. USB用ツリー
+### 6. USB用ツリー
 
 ```bash
 ./scripts/assemble-usb-tree.sh \
@@ -182,20 +206,16 @@ USB
 ```
 
 Ubuntu ARM64をUSB上のext4 rootfsから起動する手順は
-[docs/ubuntu-usb.md](docs/ubuntu-usb.md) にあります。GRUBにはBusyBox検証用と
-Ubuntu用の2つの項目が入り、Ubuntu項目は`LABEL=UBUNTU_ROOT`を自動的に
-`switch_root`します。
+[docs/ubuntu-usb.md](docs/ubuntu-usb.md) にあります。UKI内のinitramfsが
+`LABEL=UBUNTU_ROOT`を検出し、自動的に`switch_root`します。
 
 ## 起動
 
 現在のEFIは未署名です。検証時はSecure Bootを無効化し、Windowsの回復画面から
 USB Storageを選択します。
 
-通常は次を選びます。
-
-```text
-Surface Laptop 13 X1P42100 - BusyBox
-```
+UEFI removable-media fallback pathの`EFI/BOOT/BOOTAA64.EFI`から直接起動します。
+Ubuntu Desktop用にはGRUBメニューを経由しません。
 
 詳細ログと自動診断が必要なら次を選びます。
 
@@ -203,7 +223,7 @@ Surface Laptop 13 X1P42100 - BusyBox
 Surface Laptop 13 X1P42100 - verbose diagnostics
 ```
 
-verbose項目は、起動USBの書き込み可能なVFATパーティションを自動検出し、
+BusyBox verbose診断版は、起動USBの書き込み可能なVFATパーティションを自動検出し、
 ルートへ次のファイルを保存します。
 
 ```text
@@ -230,6 +250,8 @@ initramfsへ入れないと、DP3はbindしません。
 ## 既知の制限
 
 - UFSは安全のためDTSで無効です。
+- GRUBは実機上でフリーズまたはハードリセットする場合があります。Ubuntuには
+  直接UKI起動を推奨します。
 - Wi-Fi、Bluetooth、カメラ、充電、サスペンドは未完成です。
 - 内蔵オーディオは有効にしていません。
 - GPU zap firmwareは現在Surface Pro 12用X1P42100ファイルを参照しています。
