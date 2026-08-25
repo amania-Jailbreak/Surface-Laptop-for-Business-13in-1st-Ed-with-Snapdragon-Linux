@@ -33,6 +33,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "Qualcomm WCN7850 Bluetooth firmware. Check vendor redistribution terms before publishing.",
+  "note": "Qualcomm WCN7850 Bluetooth firmware hashes. Binary files are NOT distributed in this repository; obtain them from your OS vendor or an existing installation and verify these hashes before use.",
   "schema": 1
 }

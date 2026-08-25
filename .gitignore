@@ -1,0 +1,12 @@
+# Build outputs and local recovery sets are never committed.
+SURFACE-CURRENT/
+*.efi
+*.dtb
+*.img
+device-tree/base/*.dtb
+drivers/firmware/
+kernel/source/
+.work/
+
+# Local private inputs (paths vary per machine)
+initramfs/base/
