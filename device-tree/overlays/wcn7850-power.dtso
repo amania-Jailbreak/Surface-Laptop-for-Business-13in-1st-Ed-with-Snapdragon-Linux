@@ -1,0 +1,11 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * The board DT already describes WIFI_TEST_1P2 as an always-on 1.2 V rail,
+ * but the WCN7850 PMU lacked the corresponding input reference. Without it
+ * pwrseq-qcom-wcn silently substitutes a dummy regulator.
+ */
+&wcn7850_pmu_test {
+	vddio1p2-supply = <&wifi_vdd_1p2>;
+};

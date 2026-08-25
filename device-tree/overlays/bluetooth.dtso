@@ -1,0 +1,56 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Surface Laptop for Business 13 (X1P42100) WCN7850 Bluetooth test overlay.
+ *
+ * ACPI BTH0 describes Bluetooth as a QCOM UART device on UR15 (QUP_1_SE_6),
+ * with a 115200 baud boot transport, hardware flow control, and GPIO 0x74.
+ * The corresponding GENI UART is serial@a98000 in the DT, but the base DTB
+ * leaves it disabled and has no serdev Bluetooth child.
+ */
+/ {
+	compatible = "microsoft,surface-laptop-13-2095", "qcom,x1p42100";
+
+	fragment@0 {
+		target-path = "/wcn7850-pmu";
+		__overlay__ {
+			/* Required by pwrseq-qcom-wcn for the WCN7850 BT target. */
+			vddio1p2-supply = <0x17f>;
+			bt-enable-gpios = <0xf0 0x74 0x00>;
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc@0/geniqup@ac0000";
+		__overlay__ {
+			/* The UART cannot create its serdev child while the parent QUP is disabled. */
+			status = "okay";
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc@0/geniqup@ac0000/serial@a98000";
+		__overlay__ {
+			status = "okay";
+			pinctrl-0 = <0x6b>;
+			pinctrl-names = "default";
+
+			bluetooth {
+				compatible = "qcom,wcn7850-bt";
+				max-speed = <3200000>;
+
+				/* WCN7850 BT supply names used by hci_qca. */
+				vddio-supply = <0x17c>;
+				vddaon-supply = <0x181>;
+				vdddig-supply = <0x17b>;
+				vddrfa0p8-supply = <0x185>;
+				vddrfa1p2-supply = <0x186>;
+				vddrfa1p8-supply = <0x187>;
+				vddrfacmn-supply = <0x184>;
+				vddwlcx-supply = <0x182>;
+				vddwlmx-supply = <0x183>;
+			};
+		};
+	};
+};

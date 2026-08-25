@@ -1,0 +1,8 @@
+# Relative to /usr/lib/modules/<kernel-release>
+kernel/crypto/ecc.ko
+kernel/crypto/kpp.ko
+kernel/crypto/ecdh_generic.ko
+kernel/net/bluetooth/bluetooth.ko
+kernel/drivers/bluetooth/btbcm.ko
+kernel/drivers/bluetooth/btqca.ko
+kernel/drivers/bluetooth/hci_uart.ko

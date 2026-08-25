@@ -1,0 +1,5 @@
+source = https://git.kernel.org/pub/scm/linux/kernel/git/torvalds/linux.git
+revision = fc02acf6ac0ccde0c805c2daa9148683cdd01ba8
+branch = master
+architecture = arm64
+note = The local working tree may contain board bring-up changes; record its exact source revision before release.

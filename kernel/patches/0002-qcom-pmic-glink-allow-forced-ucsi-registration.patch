@@ -1,0 +1,56 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] usb: qcom: allow DT-gated UCSI registration on the board
+
+Some firmware does not provide the protection-domain state notification
+expected by the PMIC GLINK UCSI path. When the board DT explicitly opts in,
+consider charger PD available after the endpoint attaches.
+
+---
+ drivers/soc/qcom/pmic_glink.c      | 7 ++++++-
+ drivers/usb/typec/ucsi/ucsi_glink.c | 5 +++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/drivers/soc/qcom/pmic_glink.c b/drivers/soc/qcom/pmic_glink.c
+index 304226157..8da3ad41c 100644
+--- a/drivers/soc/qcom/pmic_glink.c
++++ b/drivers/soc/qcom/pmic_glink.c
+@@ -257,8 +257,13 @@ static int pmic_glink_rpmsg_probe(struct rpmsg_device *rpdev)
+ 
+ 	guard(mutex)(&pg->state_lock);
+ 	pg->ept = rpdev->ept;
+-	if (!pg->pdr_available)
++	if (!pg->pdr_available ||
++	    of_property_read_bool(pg->dev->of_node, "qcom,force-ucsi-registration")) {
++		if (pg->pdr_available)
++			dev_warn(pg->dev,
++				 "forcing charger PD up after PMIC GLINK endpoint attached\n");
+ 		pg->pdr_state = SERVREG_SERVICE_STATE_UP;
++	}
+ 	pmic_glink_state_notify_clients(pg);
+ 
+ 	return 0;
+diff --git a/drivers/usb/typec/ucsi/ucsi_glink.c b/drivers/usb/typec/ucsi/ucsi_glink.c
+index 12e07b9fe..028e28594 100644
+--- a/drivers/usb/typec/ucsi/ucsi_glink.c
++++ b/drivers/usb/typec/ucsi/ucsi_glink.c
+@@ -320,6 +320,9 @@ static void pmic_glink_ucsi_register(struct work_struct *work)
+ 	pd_running = ucsi->pd_running;
+ 	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+ 
++	dev_info(ucsi->dev, "UCSI registration state: %s\n",
++		 pd_running ? "up" : "down");
++
+ 	if (!ucsi->ucsi_registered && pd_running) {
+ 		ucsi_register(ucsi->ucsi);
+ 		ucsi->ucsi_registered = true;
+@@ -352,6 +355,8 @@ static void pmic_glink_ucsi_pdr_notify(void *priv, int state)
+ 	struct pmic_glink_ucsi *ucsi = priv;
+ 	unsigned long flags;
+ 
++	dev_info(ucsi->dev, "charger PD notification: state=%d\n", state);
++
+ 	spin_lock_irqsave(&ucsi->state_lock, flags);
+ 	ucsi->pd_running = (state == SERVREG_SERVICE_STATE_UP);
+ 	spin_unlock_irqrestore(&ucsi->state_lock, flags);
+-- 
+2.50.1

@@ -1,0 +1,158 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Surface Laptop 13 (X1P42100) 3.5 mm jack test overlay.
+ *
+ * The base DTB already has the LPASS RX/TX macros and SoundWire buses, but
+ * they are disabled and the WCD9385 codec is not described.  ACPI identifies
+ * GPIO 191 as the codec reset resource for this board.  GPIOs 204/205 remain
+ * owned by the existing WSA speaker nodes.  GPIO 448 is the Windows jack
+ * resource; WCD9385 MBHC is used for the first Linux test instead of guessing
+ * an external-gpio binding that the WCD9385 binding does not define.
+ */
+
+/ {
+	compatible = "microsoft,surface-laptop-13-2095", "qcom,x1p42100";
+
+	fragment@0 {
+		target-path = "/";
+		__overlay__ {
+			wcd938x: audio-codec {
+				compatible = "qcom,wcd9385-codec";
+
+				qcom,micbias1-microvolt = <1800000>;
+				qcom,micbias2-microvolt = <1800000>;
+				qcom,micbias3-microvolt = <1800000>;
+				qcom,micbias4-microvolt = <1800000>;
+				qcom,mbhc-buttons-vthreshold-microvolt = <75000 150000
+					237000 500000 500000 500000 500000 500000>;
+				qcom,mbhc-headset-vthreshold-microvolt = <1700000>;
+				qcom,mbhc-headphone-vthreshold-microvolt = <50000>;
+
+				qcom,rx-device = <&wcd_rx>;
+				qcom,tx-device = <&wcd_tx>;
+				reset-gpios = <0xf0 191 1>;
+
+				vdd-buck-supply = <&vreg_l15b_1p8>;
+				vdd-rxtx-supply = <&vreg_l15b_1p8>;
+				vdd-io-supply = <&vreg_l15b_1p8>;
+				vdd-mic-bias-supply = <&vreg_bob1>;
+
+				#sound-dai-cells = <1>;
+			};
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc@0/rsc@17500000";
+		__overlay__ {
+			/* PMC8380C_B rails used by WCD9385 on the X1E family. */
+			regulators-0 {
+				compatible = "qcom,pm8550-rpmh-regulators";
+				qcom,pmic-id = "b";
+				vdd-bob1-supply = <0x15e>;
+				vdd-l15-supply = <0x15e>;
+
+				vreg_bob1: bob1 {
+					regulator-name = "vreg_bob1";
+					regulator-min-microvolt = <3008000>;
+					regulator-max-microvolt = <3960000>;
+					regulator-initial-mode = <1>;
+				};
+
+				vreg_l15b_1p8: ldo15 {
+					regulator-name = "vreg_l15b_1p8";
+					regulator-min-microvolt = <1800000>;
+					regulator-max-microvolt = <1800000>;
+					regulator-initial-mode = <1>;
+					regulator-always-on;
+				};
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/soc@0/soundwire@6ad0000";
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <0>;
+			status = "okay";
+			/* New phandle for this precompiled DTB's unlabeled SWR bus. */
+			phandle = <0x300>;
+
+			wcd_rx: codec@0,4 {
+				compatible = "sdw20217010d00";
+				reg = <0 4>;
+				qcom,rx-port-mapping = <1 2 3 4 5>;
+			};
+		};
+	};
+
+	fragment@3 {
+		target-path = "/soc@0/soundwire@6d30000";
+		__overlay__ {
+			#address-cells = <2>;
+			#size-cells = <0>;
+			status = "okay";
+			/* New phandle for this precompiled DTB's unlabeled SWR bus. */
+			phandle = <0x301>;
+
+			wcd_tx: codec@0,3 {
+				compatible = "sdw20217010d00";
+				reg = <0 3>;
+				qcom,tx-port-mapping = <2 2 3 4>;
+			};
+		};
+	};
+
+	fragment@4 {
+		target-path = "/sound";
+		__overlay__ {
+			audio-routing = "SpkrLeft IN", "WSA WSA_SPK1 OUT",
+				"SpkrRight IN", "WSA WSA_SPK2 OUT",
+				"IN1_HPHL", "HPHL_OUT",
+				"IN2_HPHR", "HPHR_OUT",
+				"AMIC2", "MIC BIAS2",
+				"VA DMIC0", "MIC BIAS3",
+				"VA DMIC1", "MIC BIAS3",
+				"VA DMIC2", "MIC BIAS1",
+				"VA DMIC3", "MIC BIAS1",
+				"TX SWR_INPUT1", "ADC2_OUTPUT",
+				"VA DMIC0", "vdd-micb",
+				"VA DMIC1", "vdd-micb";
+
+			wcd-playback-dai-link {
+				link-name = "WCD Playback";
+
+				codec {
+					sound-dai = <&wcd938x 0>, <0x300 0>, <0xab 0>;
+				};
+
+				cpu {
+					sound-dai = <0x18c 113>;
+				};
+
+				platform {
+					sound-dai = <0x18b>;
+				};
+			};
+
+			wcd-capture-dai-link {
+				link-name = "WCD Capture";
+
+				codec {
+					sound-dai = <&wcd938x 1>, <0x301 1>, <0xaf 0>;
+				};
+
+				cpu {
+					sound-dai = <0x18c 120>;
+				};
+
+				platform {
+					sound-dai = <0x18b>;
+				};
+			};
+		};
+	};
+};

@@ -1,0 +1,38 @@
+{
+  "files": {
+    "hmtbtfw20.tlv": {
+      "bytes": 280652,
+      "sha256": "2ef1f0fa991a53d8da4857093b6fb91d0d7aa5f9504b01b6b522fba4fc2e6b7c"
+    },
+    "hmtnv20.b105": {
+      "bytes": 9656,
+      "sha256": "48c669431df7688fb65508090b0d779059717d9a0c4ab310dbf6f9a69e638df0"
+    },
+    "hmtnv20.b107": {
+      "bytes": 9656,
+      "sha256": "48c669431df7688fb65508090b0d779059717d9a0c4ab310dbf6f9a69e638df0"
+    },
+    "hmtnv20.b108": {
+      "bytes": 9656,
+      "sha256": "48c669431df7688fb65508090b0d779059717d9a0c4ab310dbf6f9a69e638df0"
+    },
+    "hmtnv20.b10f": {
+      "bytes": 9656,
+      "sha256": "5f439c6b3250cbd8d43db0657517ef6d467e89116d9ebd5205c1c2451691a7b0"
+    },
+    "hmtnv20.b112": {
+      "bytes": 9656,
+      "sha256": "1aaef0b243d4765d9231578f0d7a41fec1fd24ad31cfe8912127aac79fde92d8"
+    },
+    "hmtnv20.b3b": {
+      "bytes": 9656,
+      "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
+    },
+    "hmtnv20.bin": {
+      "bytes": 9656,
+      "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
+    }
+  },
+  "note": "Qualcomm WCN7850 Bluetooth firmware. Check vendor redistribution terms before publishing.",
+  "schema": 1
+}

@@ -1,0 +1,25 @@
+{
+  "schema": 1,
+  "board": "Microsoft Surface Laptop for Business 13-inch 1st Edition",
+  "soc": "Qualcomm X1P42100",
+  "architecture": "arm64",
+  "boot": {
+    "dtb_required": true,
+    "efi_stub_architecture": "aa64",
+    "usb_c_mode": "host"
+  },
+  "validated_paths": [
+    "DRM display",
+    "eight CPU cores",
+    "USB-A host and internal HID",
+    "Wi-Fi",
+    "battery and brightness reporting",
+    "Type-C storage baseline",
+    "WCN7850 Bluetooth candidate"
+  ],
+  "known_limitations": [
+    "Suspend is not a supported recovery path",
+    "3.5 mm codec overlay is experimental",
+    "Direct-attached SuperSpeed storage may be less reliable than a USB 2 hub"
+  ]
+}

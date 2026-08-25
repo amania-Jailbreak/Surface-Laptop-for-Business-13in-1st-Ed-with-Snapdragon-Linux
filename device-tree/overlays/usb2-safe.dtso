@@ -1,0 +1,15 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Reliability profile for directly attached boot storage.
+ *
+ * The Surface multi-port DWC3 controller is stable through a USB 2 hub but
+ * intermittently loses directly attached SuperSpeed storage. Keep the known
+ * working board DTB intact and cap only this controller at High Speed. Keep
+ * every PHY reference because the Qualcomm MP wrapper expects the complete
+ * port description.
+ */
+&{/soc@0/usb@a400000} {
+	maximum-speed = "high-speed";
+};

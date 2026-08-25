@@ -1,0 +1,12 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * A USB 3 hub also fixes the direct-storage failure, so link speed is not the
+ * useful discriminator. Keep SuperSpeed enabled and only disable DWC3 SS
+ * park mode, a controller-side state which a hub naturally terminates on a
+ * different link. This overlay is offered as a non-default diagnostic UKI.
+ */
+&{/soc@0/usb@a400000} {
+	snps,parkmode-disable-ss-quirk;
+};
