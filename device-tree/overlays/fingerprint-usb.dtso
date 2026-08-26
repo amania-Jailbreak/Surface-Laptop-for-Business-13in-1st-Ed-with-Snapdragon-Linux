@@ -1,0 +1,23 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Surface Laptop for Business 13 (X1P42100) fingerprint USB controller.
+ *
+ * The Windows ACPI QCOM0D09 host controller maps to MMIO 0x0a200000.
+ * Windows enumerates the power-button fingerprint reader below it as the
+ * ELAN 667 USB composite device 04f3:0c9e.  The measured Linux baseline
+ * leaves this otherwise complete USB2-only DWC3 controller disabled.
+ */
+/ {
+	compatible = "microsoft,surface-laptop-13-2095", "qcom,x1p42100";
+
+	fragment@0 {
+		target-path = "/soc@0/usb@a200000";
+		__overlay__ {
+			status = "okay";
+			dr_mode = "host";
+			maximum-speed = "high-speed";
+		};
+	};
+};

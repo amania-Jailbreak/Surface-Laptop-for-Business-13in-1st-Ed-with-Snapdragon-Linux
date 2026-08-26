@@ -37,10 +37,13 @@ kernel_config="$KERNEL_OUT/config"
 kernel_release="$KERNEL_OUT/release"
 base_dtb="$DTB_OUT/surface-laptop-13-current.dtb"
 bluetooth_dtb="$DTB_OUT/surface-laptop-13-bluetooth.dtb"
+fingerprint_dtb="$DTB_OUT/surface-laptop-13-fingerprint.dtb"
+bluetooth_fingerprint_dtb="$DTB_OUT/surface-laptop-13-bluetooth-fingerprint.dtb"
 current_initrd="$INITRD_OUT/surface-laptop-13-current.img"
 bluetooth_initrd="$INITRD_OUT/surface-laptop-13-bluetooth.img"
 current_uki="$UKI_OUT/surface-laptop-13-current.efi"
 bluetooth_uki="$UKI_OUT/surface-laptop-13-bluetooth.efi"
+fingerprint_uki="$UKI_OUT/surface-laptop-13-fingerprint.efi"
 
 mkdirs() { mkdir -p "$KERNEL_OUT" "$MODULE_OUT" "$DTB_OUT" "$INITRD_OUT" "$UKI_OUT"; }
 
@@ -71,6 +74,7 @@ check_inputs() {
 	done
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" ]] || die "public touchscreen overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" ]] || die "public Bluetooth overlay missing"
+	[[ -f "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" ]] || die "public fingerprint USB overlay missing"
 	if command -v docker >/dev/null 2>&1; then
 		printf 'container runtime: docker\n'
 	elif command -v podman >/dev/null 2>&1; then
@@ -165,7 +169,7 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 build_dtb() {
 	need dtc; need fdtoverlay; need fdtget
 	mkdirs
-	log "Building Type-C, touchscreen, and Bluetooth device trees"
+	log "Building Type-C, touchscreen, Bluetooth, and fingerprint device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
 	# Prefer the measured Type-C baseline DTB. The standalone DTS is retained
 	# for inspection and can be selected explicitly when rebuilding it.
@@ -177,10 +181,14 @@ build_dtb() {
 	fi
 	local touchscreen_overlay="$DTB_OUT/touchscreen.dtbo"
 	local bluetooth_overlay="$DTB_OUT/bluetooth.dtbo"
+	local fingerprint_overlay="$DTB_OUT/fingerprint-usb.dtbo"
 	dtc -@ -I dts -O dtb -o "$touchscreen_overlay" "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" >"$DTB_OUT/touchscreen-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
+	dtc -@ -I dts -O dtb -o "$fingerprint_overlay" "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" >"$DTB_OUT/fingerprint-dtc.log" 2>&1
 	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$touchscreen_overlay"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
+	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
+	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
@@ -192,6 +200,10 @@ build_dtb() {
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth compatible is unexpected"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth max-speed)" == 3200000 ]] || die "Bluetooth UART speed is unexpected"
+	for candidate in "$fingerprint_dtb" "$bluetooth_fingerprint_dtb"; do
+		[[ "$(fdtget "$candidate" /soc@0/usb@a200000 status)" == okay ]] || die "fingerprint USB controller is disabled in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/usb@a200000 dr_mode)" == host ]] || die "fingerprint USB controller is not host mode in $candidate"
+	done
 }
 
 build_initramfs() {
@@ -261,6 +273,16 @@ build_bluetooth() {
 	krel=$(tr -d '\n' <"$kernel_release")
 	build_initramfs "$krel"
 	build_uki "$kernel_image" "$bluetooth_initrd" "$bluetooth_uki" "$bluetooth_dtb"
+}
+
+build_fingerprint() {
+	write_neutral_metadata
+	[[ -f "$kernel_image" ]] || build_kernel
+	[[ -f "$bluetooth_fingerprint_dtb" ]] || build_dtb
+	local krel
+	krel=$(tr -d '\n' <"$kernel_release")
+	[[ -f "$bluetooth_initrd" ]] || build_initramfs "$krel"
+	build_uki "$kernel_image" "$bluetooth_initrd" "$fingerprint_uki" "$bluetooth_fingerprint_dtb"
 }
 
 write_manifest() {
@@ -375,7 +397,8 @@ case "$target" in
 	initramfs) check_full_inputs; write_neutral_metadata; [[ -f "$kernel_image" ]] || build_kernel; build_dtb; build_initramfs "$(tr -d '\n' <"$kernel_release")" ;;
 	uki) check_full_inputs; build_uki_pair ;;
 	bluetooth) check_full_inputs; build_bluetooth ;;
+	fingerprint) check_full_inputs; build_fingerprint ;;
 	package) check_full_inputs; package_artifacts ; verify ;;
 	verify) check_inputs; verify ;;
-	*) die "usage: $0 {check|kernel|dtb|initramfs|uki|bluetooth|package|verify}" ;;
+	*) die "usage: $0 {check|kernel|dtb|initramfs|uki|bluetooth|fingerprint|package|verify}" ;;
 esac

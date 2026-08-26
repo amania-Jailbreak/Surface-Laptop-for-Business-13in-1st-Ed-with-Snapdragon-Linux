@@ -22,6 +22,11 @@ The overlays are applied to a DTB with `fdtoverlay`, not merged into a generic
 kernel source tree. The touchscreen overlay is part of both generated DTBs;
 the Bluetooth overlay remains an additional boot choice.
 
+The experimental fingerprint overlay enables the internal USB2 controller at
+`0x0a200000`. Windows identifies that controller as `QCOM0D09` and enumerates
+the power-button ELAN `04f3:0c9e` fingerprint reader below it. See
+`docs/fingerprint.md` for evidence, limitations, and test commands.
+
 The experimental 3.5 mm codec work is not part of the default boot artifacts.
 It remains documented as an unvalidated experiment under
 `device-tree/overlays/experimental/`.

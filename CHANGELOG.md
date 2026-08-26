@@ -1,5 +1,14 @@
 # Changelog
 
+## 2026-08-26 - experimental fingerprint USB enablement
+
+- identified the power-button reader from the Windows driver set as ELAN 667
+  `04f3:0c9e` (WBF/ESS Match-on-Chip);
+- mapped its Windows `QCOM0D09` USB host to DT node `usb@a200000`;
+- added a separate overlay and fingerprint UKI target without changing the
+  hardware-tested default boot configuration;
+- documented the remaining USB-enumeration and libfprint validation work.
+
 ## 2026-08-26 - touchscreen support
 
 - added the hardware-tested `MSHW0468` HID-over-I2C touchscreen at address

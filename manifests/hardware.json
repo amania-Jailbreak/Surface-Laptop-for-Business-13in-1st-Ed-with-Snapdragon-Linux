@@ -21,6 +21,7 @@
   "known_limitations": [
     "Suspend is not a supported recovery path",
     "3.5 mm codec overlay is experimental",
-    "Direct-attached SuperSpeed storage may be less reliable than a USB 2 hub"
+    "Direct-attached SuperSpeed storage may be less reliable than a USB 2 hub",
+    "ELAN 04f3:0c9e fingerprint USB enumeration and libfprint support are experimental"
   ]
 }

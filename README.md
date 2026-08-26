@@ -21,6 +21,7 @@ The native builder uses an existing Linux kernel checkout when one is present:
 ./build.sh initramfs
 ./build.sh uki
 ./build.sh bluetooth
+./build.sh fingerprint
 ./build.sh package
 ./build.sh verify
 ```
@@ -45,6 +46,12 @@ The two UKIs both include the hardware-tested touchscreen configuration:
   base initramfs.
 - `surface-laptop-13-bluetooth.efi`: the same Type-C/touchscreen baseline with the
   WCN7850 UART child and early Bluetooth modules/firmware.
+
+`surface-laptop-13-fingerprint.efi` is an experimental third boot choice. It
+keeps Type-C, touchscreen, and Bluetooth while enabling the internal USB host
+used by the ELAN `04f3:0c9e` power-button fingerprint reader. See
+`docs/fingerprint.md`; enumeration and libfprint authentication are not yet
+hardware-validated.
 
 The kernel release is deliberately neutral:
 `7.2.0-rc5-surface-laptop-13` for the current source snapshot.
