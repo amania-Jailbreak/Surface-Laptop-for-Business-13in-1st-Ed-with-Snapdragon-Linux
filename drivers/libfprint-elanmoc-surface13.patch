@@ -1,0 +1,67 @@
+diff --git a/libfprint/drivers/elanmoc/elanmoc.c b/libfprint/drivers/elanmoc/elanmoc.c
+index 23bd901..0d96372 100644
+--- a/libfprint/drivers/elanmoc/elanmoc.c
++++ b/libfprint/drivers/elanmoc/elanmoc.c
+@@ -35,6 +35,7 @@ static const FpIdEntry id_table[] = {
+   { .vid = 0x04f3,  .pid = 0x0c99,  },
+   { .vid = 0x04f3,  .pid = 0x0c9c,  },
+   { .vid = 0x04f3,  .pid = 0x0c9d,  },
++  { .vid = 0x04f3,  .pid = 0x0c9e,  }, /* Surface Laptop 13 ELAN 667 (MOC on EP3) */
+   { .vid = 0x04f3,  .pid = 0x0c9f,  },
+   { .vid = 0x04f3,  .pid = 0x0ca3,  },
+   { .vid = 0x04f3,  .pid = 0x0ca7,  },
+@@ -179,7 +180,9 @@ fp_cmd_run_state (FpiSsm   *ssm,
+         }
+       transfer = fpi_usb_transfer_new (dev);
+       transfer->ssm = ssm;
+-      fpi_usb_transfer_fill_bulk (transfer, self->cmd_cancelable ? ELAN_EP_MOC_CMD_IN : ELAN_EP_CMD_IN, self->cmd_len_in);
++      fpi_usb_transfer_fill_bulk (transfer,
++                                  (self->cmd_cancelable && !self->moc_ep3) ? ELAN_EP_MOC_CMD_IN : ELAN_EP_CMD_IN,
++                                  self->cmd_len_in);
+       fpi_usb_transfer_submit (transfer,
+                                self->cmd_cancelable ? 0 : ELAN_MOC_CMD_TIMEOUT,
+                                self->cmd_cancelable ? fpi_device_get_cancellable (dev) : NULL,
+@@ -1067,6 +1070,11 @@ elanmoc_open (FpDevice *device)
+     goto error;
+ 
+   productid = g_usb_device_get_pid (fpi_device_get_usb_device (device));
++  /* Surface Laptop 13 (04f3:0c9e) reports MOC responses on EP3 */
++  if (productid == 0x0c9e)
++    {
++      self->moc_ep3 = TRUE;
++    }
+   switch (productid)
+     {
+     case 0x0c8c:
+diff --git a/libfprint/drivers/elanmoc/elanmoc.h b/libfprint/drivers/elanmoc/elanmoc.h
+index a948d40..81872e0 100644
+--- a/libfprint/drivers/elanmoc/elanmoc.h
++++ b/libfprint/drivers/elanmoc/elanmoc.h
+@@ -31,6 +31,7 @@ G_DECLARE_FINAL_TYPE (FpiDeviceElanmoc, fpi_device_elanmoc, FPI, DEVICE_ELANMOC,
+ #define ELAN_M0C_CMD_LEN 0x3
+ #define ELAN_EP_CMD_OUT (0x1 | LIBUSB_ENDPOINT_OUT)
+ #define ELAN_EP_CMD_IN (0x3 | LIBUSB_ENDPOINT_IN)
++/* Surface Laptop 13 (04f3:0c9e) reports MOC responses on EP3 instead of EP4 */
+ #define ELAN_EP_MOC_CMD_IN (0x4 | LIBUSB_ENDPOINT_IN)
+ #define ELAN_EP_IMG_IN (0x2 | LIBUSB_ENDPOINT_IN)
+ 
+@@ -192,5 +193,6 @@ struct _FpiDeviceElanmoc
+   int             cancel_result;
+   int             cmd_retry_cnt;
+   int             list_index;
++  gboolean        moc_ep3;
+   GPtrArray      *list_result;
+ };
+diff --git a/tests/meson.build b/tests/meson.build
+index aad0675..2147ef3 100644
+--- a/tests/meson.build
++++ b/tests/meson.build
+@@ -292,7 +292,7 @@ else
+         args: ['-c', 'exit 77']
+     )
+ 
+-    foreach driver_test: drivers_tests
++    foreach driver_test, args: drivers_tests
+         test(driver_test,
+             sh,
+             args: ['-c', 'exit 77']

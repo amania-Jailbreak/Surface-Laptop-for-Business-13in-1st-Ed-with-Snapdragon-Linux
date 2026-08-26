@@ -33,8 +33,6 @@ lsusb -t
 dmesg | grep -Ei 'a200000|04f3|0c9e|elan|finger'
 ```
 
-Enumeration is only the first stage. Upstream libfprint's development device
-list does not currently include `04f3:0c9e`, although adjacent ELAN MOC IDs
-are supported. A small ID/quirk addition may work, but enrollment and matching
-must be tested before enabling PAM authentication. Keep password login
-available throughout testing.
+Userspace support is complete: see docs/fingerprint-userspace.md and the
+hardware-tested libfprint patch in drivers/. Enrollment and verification are
+confirmed on hardware; PAM integration remains a distribution-level step.

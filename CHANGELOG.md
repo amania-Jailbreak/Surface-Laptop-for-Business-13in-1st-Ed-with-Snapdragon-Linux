@@ -36,6 +36,19 @@
 - verified on hardware: neutral UKI boots, Type-C storage works, Bluetooth
   loads from the distribution module tree without initramfs injection.
 
+## 2026-08-26 - fingerprint userspace bring-up
+
+- confirmed the ELAN 667 reader (04f3:0c9e) enumerates on the dedicated
+  internal USB host and is a Match-on-Chip sensor compatible with the
+  upstream elanmoc driver;
+- added drivers/libfprint-elanmoc-surface13.patch: registers the PID and
+  selects EP3 for cancelable MOC responses on this sensor only, leaving all
+  other elanmoc IDs untouched;
+- hardware-tested enrollment (nine stages) and verification
+  (fprintd-verify reports verify-match) through fprintd with a custom
+  libfprint build; no out-of-tree kernel driver or firmware loading needed;
+- documented userspace setup and caveats in docs/fingerprint-userspace.md.
+
 ## Hardware support baseline
 
 - separated Surface kernel, DTB, firmware, driver, initramfs, and UKI inputs
