@@ -1,116 +1,109 @@
-# Surface Laptop 13 Linux Hardware Support
+# Surface Laptop 13 Linux
 
-This repository contains board support for the Microsoft Surface Laptop for
-Business 13-inch (1st Edition) with Qualcomm X1P42100. It is intentionally
-independent of any Linux distribution. The repository describes the kernel,
-device tree, firmware, driver requirements, initramfs hooks, and bootable UKI
-assembly inputs.
+Linux support for the Surface Laptop for Business 13" (1st edition,
+Snapdragon X1P42100), built by testing on real hardware. Everything here is
+distro-neutral: kernel config and patches, device tree, firmware lists,
+initramfs hooks, and the inputs needed to assemble a bootable UKI.
 
-It does not contain a root filesystem, desktop, installer, disk image, or
-package repository. An operating system supplies those pieces and passes its
-own root identifier and initramfs policy to the UKI build.
+There is no root filesystem, desktop, or disk image in this repository. Your
+distribution provides those; this repo provides the hardware-specific parts.
 
-## Quick start
 
-The native builder uses an existing Linux kernel checkout when one is present:
+## What works
+
+Tested on the actual machine:
+
+- Boot via UKI (systemd-boot) from external USB storage
+- Both USB-C ports in host mode (SSD, hub, display adapter)
+- Bluetooth (WCN7850 over UART)
+- Touchscreen (HID-over-I2C, `1FD2:4001`)
+- Fingerprint reader in the power button (`04f3:0c9e`): enrollment and
+  matching work through fprintd with a small libfprint patch
+
+Known limitations: suspend reboots instead of resuming, the internal speaker
+works but the 3.5mm jack needs more DT work before it is safe to enable, and
+the internal microphone has never worked.
+
+
+## Building
+
+You need a kernel checkout and an AArch64 cross compiler. Then:
 
 ```sh
-./build.sh check
-./build.sh dtb
+./build.sh check      # verify inputs exist
+./build.sh dtb        # device trees (works standalone)
 ./build.sh kernel
 ./build.sh initramfs
 ./build.sh uki
-./build.sh bluetooth
-./build.sh fingerprint
 ./build.sh package
 ./build.sh verify
 ```
 
-The kernel build needs an AArch64 cross compiler. Device-tree and UKI assembly
-can be run independently. A reproducible builder image is provided in
-`Containerfile`; run it with Docker or Podman from a checkout that has the
-kernel source and private boot-component inputs mounted or copied into the
-build context.
+`Containerfile` builds the same thing in Docker/Podman if you prefer a
+container. The kernel build is the slow part; everything else takes seconds.
 
-## Outputs
 
-`SURFACE-CURRENT/` is a local recovery set containing only Surface boot
-components. It has no full operating-system image. The generated UKIs and
-initramfs files are ignored by default because they can exceed the normal
-100 MiB repository-file limit; `MANIFEST.json` and `SHA256SUMS` remain useful
-for transfer and recovery.
+## Boot files
 
-The two UKIs both include the hardware-tested touchscreen configuration:
+The build produces three UKIs from one kernel:
 
-- `surface-laptop-13-current.efi`: Type-C host and touchscreen DTB with the
-  base initramfs.
-- `surface-laptop-13-bluetooth.efi`: the same Type-C/touchscreen baseline with the
-  WCN7850 UART child and early Bluetooth modules/firmware.
+- `surface-laptop-13-current.efi` - USB-C host + touchscreen, the baseline
+- `surface-laptop-13-bluetooth.efi` - same + WCN7850 UART node and early BT
+  modules/firmware in the initramfs
+- `surface-laptop-13-fingerprint.efi` - bluetooth baseline + internal USB host
+  for the fingerprint reader
 
-`surface-laptop-13-fingerprint.efi` is an experimental third boot choice. It
-keeps Type-C, touchscreen, and Bluetooth while enabling the internal USB host
-used by the ELAN `04f3:0c9e` power-button fingerprint reader. See
-`docs/fingerprint.md`; enumeration and libfprint authentication are not yet
-hardware-validated.
+Kernel version string: `7.2.0-rc5-surface-laptop-13`.
 
-The kernel release is deliberately neutral:
-`7.2.0-rc5-surface-laptop-13` for the current source snapshot.
 
-## Porting to another distribution
+## Using on your own install
 
-1. Build or obtain a kernel using `kernel/config/base.config` and the locked
-   source revision in `kernel/source.lock`.
-2. Place the distribution's own initramfs in the input path and add the
-   Surface early module/firmware hook from `initramfs/scripts/`.
-3. Set a distribution-owned root UUID or label in the command-line input.
-4. Build the DTB/overlay and UKI, then verify the generated sections and
-   hashes before copying them to the target ESP.
+1. Build or reuse a kernel from `kernel/config/base.config` (source revision
+   locked in `kernel/source.lock`).
+2. Take your distro initramfs, add the early-firmware hook from
+   `initramfs/scripts/` if you boot from USB-C storage.
+3. Point the kernel cmdline at your root (`LABEL=`, `UUID=`, whatever your
+   distro uses).
+4. Assemble the UKI, check its sections/hashes, copy it to the ESP.
 
-The hardware DTB uses host mode for both USB-C controllers. The Bluetooth
-overlay enables the GENI UART at `a98000`, creates a `qcom,wcn7850-bt` serdev
-child, and supplies the board PMU enable GPIO and regulator references.
-The touchscreen overlay enables the GENI I2C controller at `a80000` and uses
-the ACPI-confirmed HID descriptor register address `0`.
+If booting from USB, make sure `uas` loads before root mount - build it in or
+add it to initramfs modules.
 
-## Hardware validation
+Both USB-C controllers run fixed host mode (no role switching). The Bluetooth
+overlay adds a `qcom,wcn7850-bt` serdev child on GENI UART `a98000` plus its
+enable GPIO/regulators; touchscreen sits on I2C at `a80000`, address `0x34`,
+HID descriptor register 0 (from Windows ACPI).
 
-On the target machine, collect:
+
+## Checking it works
+
+After boot, useful commands:
 
 ```sh
-bluetoothctl list
-rfkill list
-lsusb
-readlink /sys/bus/i2c/devices/1-0034/driver
-cat /proc/cmdline
-dmesg | grep -Ei 'dwc3|xhci|bluetooth|hci|qca|wcn7850|i2c_hid|hid-multitouch'
+bluetoothctl list          # should show a controller
+rfkill list                # nothing hard-blocked
+lsusb                      # 04f3:3317 keyboard/touchpad, 04f3:0c9e fingerprint
+cat /proc/asound/cards     # sound card present
+dmesg | grep -Ei 'dwc3|xhci|wcn7850|i2c_hid'
 ```
 
-### 2026-08-26 verified configuration
+Fingerprint userspace setup (libfprint patch, fprintd) is documented in
+`docs/fingerprint-userspace.md`.
 
-A kernel built from this repository (`7.2.0-rc5-surface-laptop-13`) was booted
-on the target machine as a UKI together with the Bluetooth DTB above. The
-Bluetooth stack (hci_uart, btqca, bluetooth) loaded from the installed module
-tree in the running root filesystem; no Bluetooth modules are required inside
-the initramfs when the distribution installs `kernel/net/bluetooth`,
-`kernel/drivers/bluetooth`, and the QCA firmware files listed in
-`drivers/firmware-manifest.json` under `/lib/firmware/qca/`.
 
-Type-C host mode works with direct-attached storage. When booting from USB,
-load the `uas` module (or build it in) so second-stage storage is detected.
+## Docs
 
-The internal touchscreen was identified as HID-over-I2C `1FD2:4001` on
-`1-0034`. The WCN7850 Bluetooth controller and both USB-C host controllers
-were active in the same boot. See `docs/touchscreen.md` for the ACPI-derived
-descriptor-register value and failure signature.
+- `docs/build.md` - build system details
+- `docs/boot.md` - UKI layout, systemd-boot entries
+- `docs/device-tree.md` - what each overlay changes and why
+- `docs/bluetooth.md`, `docs/touchscreen.md`, `docs/fingerprint.md` -
+  per-device notes with ACPI references and failure signatures
+- `docs/porting.md` - adapting to another distribution
+- `docs/recovery.md` - SURFACE-CURRENT recovery set
 
-The Type-C test must still be repeated with the boot SSD and a second USB
-device in separate trials on untested units. Direct-attached storage has been
-less reliable than storage behind a USB 2 hub on this board family.
 
-## Licensing and firmware
+## Firmware note
 
-The scripts and documentation in this repository are provided under the
-license in `LICENSE`. Kernel source and patches retain their upstream
-licenses. Qualcomm firmware is listed with hashes in
-`drivers/firmware-manifest.json`; redistribution rights must be checked before
-publishing those binary files.
+Qualcomm firmware files are listed with SHA256 hashes in
+`drivers/firmware-manifest.json`. This repo does not ship them - check your
+redistribution rights before publishing binaries.
