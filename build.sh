@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)
-PUBLIC_DIR="$ROOT_DIR/Surface-build"
+PUBLIC_DIR="$ROOT_DIR"
 # Kernel/Kconfig builds need symlinks, which are not available on some SMB
 # mounts. Keep scratch data local while committing only final components.
 WORK_DIR=${SURFACE_WORK_DIR:-/tmp/surface-laptop-13-build}
@@ -14,9 +14,9 @@ need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"
 
 # All build inputs are supplied by the environment or by an OS integration.
 # Nothing in this script references a private development workspace.
-: "${KERNEL_SOURCE:?set KERNEL_SOURCE to a Linux 7.x checkout for ARM64}"
-: "${INITRD_BASE:?set INITRD_BASE to a distribution initramfs (gzip cpio)}"
-: "${FIRMWARE_SOURCE:?set FIRMWARE_SOURCE to a directory with qca/hmtbtfw20.tlv and hmtnv20 files}"
+KERNEL_SOURCE=${KERNEL_SOURCE:-}
+INITRD_BASE=${INITRD_BASE:-}
+FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
 KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dtb}
@@ -65,12 +65,11 @@ EOF
 
 check_inputs() {
 	local f
-	need bash; need find; need make; need dtc; need fdtoverlay; need fdtget
-	need ukify; need python3; need sha256sum; need strings; need rg
-	for f in "$KERNEL_SOURCE/Makefile" "$KERNEL_CONFIG" "$BASE_DTS" "$BASE_DTB_INPUT" "$INITRD_BASE" "$UKI_STUB"; do
+	need bash; need find; need dtc; need fdtoverlay; need fdtget
+	for f in "$KERNEL_CONFIG" "$BASE_DTS" "$BASE_DTB_INPUT"; do
 		[[ -f "$f" ]] || die "input not found: $f"
 	done
-	[[ -d "$FIRMWARE_SOURCE" ]] || die "firmware directory not found: $FIRMWARE_SOURCE"
+	[[ -f "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" ]] || die "public touchscreen overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" ]] || die "public Bluetooth overlay missing"
 	if command -v docker >/dev/null 2>&1; then
 		printf 'container runtime: docker\n'
@@ -79,7 +78,18 @@ check_inputs() {
 	else
 		printf 'container runtime: unavailable (native build remains supported)\n'
 	fi
-	printf 'kernel source: %s\nconfig: %s\nDT source: %s\n' "$KERNEL_SOURCE" "$KERNEL_CONFIG" "$BASE_DTS"
+	printf 'config: %s\nDT source: %s\n' "$KERNEL_CONFIG" "$BASE_DTS"
+	[[ -z "$KERNEL_SOURCE" ]] || printf 'kernel source: %s\n' "$KERNEL_SOURCE"
+}
+
+check_full_inputs() {
+	check_inputs
+	need make; need ukify; need python3; need sha256sum; need strings; need rg
+	local f
+	for f in "$KERNEL_SOURCE/Makefile" "$INITRD_BASE" "$UKI_STUB"; do
+		[[ -f "$f" ]] || die "input not found: $f"
+	done
+	[[ -d "$FIRMWARE_SOURCE" ]] || die "firmware directory not found: $FIRMWARE_SOURCE"
 }
 
 apply_public_patches() {
@@ -100,7 +110,7 @@ apply_public_patches() {
 
 build_kernel() {
 	need make; need aarch64-linux-gnu-gcc
-	[[ -d "$KERNEL_SOURCE" ]] || die "kernel source directory not found: $KERNEL_SOURCE"
+	[[ -f "$KERNEL_SOURCE/Makefile" ]] || die "kernel source directory not found: $KERNEL_SOURCE"
 	mkdirs
 	if [[ ! -f "$KERNEL_SOURCE/.config" && ! -d "$KERNEL_SOURCE/include/config" && ! -d "$KERNEL_SOURCE/arch/arm64/include/generated" ]]; then
 		# A clean checkout can be used directly with O=; the kernel build writes
@@ -155,22 +165,29 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 build_dtb() {
 	need dtc; need fdtoverlay; need fdtget
 	mkdirs
-	log "Building base and Bluetooth device trees"
+	log "Building Type-C, touchscreen, and Bluetooth device trees"
+	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
 	# Prefer the measured Type-C baseline DTB. The standalone DTS is retained
 	# for inspection and can be selected explicitly when rebuilding it.
 	if [[ "${REBUILD_BASE_DTB:-0}" == 1 ]]; then
-		dtc -@ -I dts -O dtb -o "$base_dtb" "$BASE_DTS" >"$DTB_OUT/base-dtc.log" 2>&1
+		dtc -@ -I dts -O dtb -o "$raw_base_dtb" "$BASE_DTS" >"$DTB_OUT/base-dtc.log" 2>&1
 	else
-		cp "$BASE_DTB_INPUT" "$base_dtb"
+		cp "$BASE_DTB_INPUT" "$raw_base_dtb"
 		printf 'copied measured base DTB from %s\n' "$BASE_DTB_INPUT" >"$DTB_OUT/base-dtc.log"
 	fi
-	local overlay="$DTB_OUT/bluetooth.dtbo"
-	dtc -@ -I dts -O dtb -o "$overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
-	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$overlay"
+	local touchscreen_overlay="$DTB_OUT/touchscreen.dtbo"
+	local bluetooth_overlay="$DTB_OUT/bluetooth.dtbo"
+	dtc -@ -I dts -O dtb -o "$touchscreen_overlay" "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" >"$DTB_OUT/touchscreen-dtc.log" 2>&1
+	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
+	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$touchscreen_overlay"
+	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a800000 dr_mode)" == host ]] || die "USB-C port 1 is not host in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 compatible)" == hid-over-i2c ]] || die "touchscreen node is missing in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "touchscreen HID descriptor address is not zero in $candidate"
 	done
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth compatible is unexpected"
@@ -179,6 +196,8 @@ build_dtb() {
 
 build_initramfs() {
 	need python3
+	[[ -f "$INITRD_BASE" ]] || die "initramfs input not found: $INITRD_BASE"
+	[[ -d "$FIRMWARE_SOURCE" ]] || die "firmware directory not found: $FIRMWARE_SOURCE"
 	mkdirs
 	log "Preparing OS-neutral initramfs inputs"
 	cp "$INITRD_BASE" "$current_initrd"
@@ -211,11 +230,12 @@ build_initramfs() {
 
 build_uki() {
 	need ukify; need file
-	local image="$1" initrd="$2" output="$3"
-	[[ -f "$image" && -f "$initrd" && -f "$4" ]] || die "UKI input missing"
+	local image="$1" initrd="$2" output="$3" dtb="$4"
+	[[ -f "$image" && -f "$initrd" && -f "$dtb" ]] || die "UKI input missing"
+	[[ -f "$UKI_STUB" ]] || die "UKI stub not found: $UKI_STUB"
 	mkdir -p "$(dirname "$output")"
 	ukify build --stub="$UKI_STUB" --linux="$image" --initrd="$initrd" \
-		--devicetree="$base_dtb" --cmdline="@$CMDLINE" --os-release="@$OS_RELEASE" \
+		--devicetree="$dtb" --cmdline="@$CMDLINE" --os-release="@$OS_RELEASE" \
 		--output="$output"
 	file "$output" | grep -Eq 'PE32\\+.*(Aarch64|ARM64|ARM aarch64)' || die "not an ARM64 UKI: $output"
 }
@@ -230,11 +250,7 @@ build_uki_pair() {
 	[[ -f "$bluetooth_initrd" ]] || build_initramfs "$krel"
 	log "Building neutral UKIs"
 	build_uki "$kernel_image" "$current_initrd" "$current_uki" "$base_dtb"
-	# A Bluetooth UKI uses the overlay DTB through a temporary build-time link.
-	local saved_dtb="$base_dtb"
-	base_dtb="$bluetooth_dtb"
 	build_uki "$kernel_image" "$bluetooth_initrd" "$bluetooth_uki" "$bluetooth_dtb"
-	base_dtb="$saved_dtb"
 }
 
 build_bluetooth() {
@@ -244,10 +260,7 @@ build_bluetooth() {
 	local krel
 	krel=$(tr -d '\n' <"$kernel_release")
 	build_initramfs "$krel"
-	local saved_dtb="$base_dtb"
-	base_dtb="$bluetooth_dtb"
 	build_uki "$kernel_image" "$bluetooth_initrd" "$bluetooth_uki" "$bluetooth_dtb"
-	base_dtb="$saved_dtb"
 }
 
 write_manifest() {
@@ -316,6 +329,7 @@ package_artifacts() {
 forbidden_name() { printf "%s" "circl""eos"; }
 
 verify() {
+	need rg; need strings; need python3; need sha256sum; need stat; need fdtget
 	local forbidden
 	forbidden=$(forbidden_name)
 	log "Verifying public artifact boundaries"
@@ -332,6 +346,8 @@ verify() {
 	[[ -f "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" ]] || die "Bluetooth DTB is missing"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "current DTB USB-C port 0 is not host"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "current DTB USB-C port 1 is not host"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "current DTB touchscreen HID descriptor address is not zero"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "Bluetooth DTB touchscreen HID descriptor address is not zero"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is not enabled"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth node is missing"
 	[[ -f "$CURRENT_DIR/firmware/qca/hmtbtfw20.tlv" ]] || die "Bluetooth firmware is missing"
@@ -353,13 +369,13 @@ verify() {
 
 target=${1:-check}
 case "$target" in
-	check) check_inputs ;;
+	check) check_full_inputs ;;
 	kernel) check_inputs; build_kernel ;;
 	dtb) check_inputs; build_dtb ;;
-	initramfs) check_inputs; write_neutral_metadata; [[ -f "$kernel_image" ]] || build_kernel; build_dtb; build_initramfs "$(tr -d '\n' <"$kernel_release")" ;;
-	uki) check_inputs; build_uki_pair ;;
-	bluetooth) check_inputs; build_bluetooth ;;
-	package) check_inputs; package_artifacts ; verify ;;
+	initramfs) check_full_inputs; write_neutral_metadata; [[ -f "$kernel_image" ]] || build_kernel; build_dtb; build_initramfs "$(tr -d '\n' <"$kernel_release")" ;;
+	uki) check_full_inputs; build_uki_pair ;;
+	bluetooth) check_full_inputs; build_bluetooth ;;
+	package) check_full_inputs; package_artifacts ; verify ;;
 	verify) check_inputs; verify ;;
 	*) die "usage: $0 {check|kernel|dtb|initramfs|uki|bluetooth|package|verify}" ;;
 esac

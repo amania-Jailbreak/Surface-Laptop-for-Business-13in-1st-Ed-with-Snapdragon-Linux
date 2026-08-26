@@ -1,0 +1,47 @@
+/dts-v1/;
+/plugin/;
+
+/*
+ * Surface Laptop for Business 13 (X1P42100) touchscreen.
+ *
+ * Windows ACPI identifies MSHW0468/PNP0C50 at I2C address 0x34 on
+ * QUP_1_SE_0 (MMIO 0x00a80000), with GPIO38 as the interrupt. Its HID-I2C
+ * _DSM returns descriptor register address 0. Reading register 1 returns an
+ * invalid all-zero descriptor on this machine.
+ */
+/ {
+	compatible = "microsoft,surface-laptop-13-2095", "qcom,x1p42100";
+
+	fragment@0 {
+		target-path = "/soc@0/geniqup@ac0000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
+
+	fragment@1 {
+		target-path = "/soc@0/geniqup@ac0000/i2c@a80000";
+		__overlay__ {
+			status = "okay";
+			clock-frequency = <100000>;
+
+			touchscreen@34 {
+				compatible = "hid-over-i2c";
+				reg = <0x34>;
+				hid-descr-addr = <0>;
+				interrupts-extended = <0xf0 38 2>;
+				pinctrl-0 = <0x59>;
+				pinctrl-names = "default";
+				vdd-supply = <0xe3>;
+				vddl-supply = <0x17c>;
+			};
+		};
+	};
+
+	fragment@2 {
+		target-path = "/regulator-edp-3p3";
+		__overlay__ {
+			startup-delay-us = <300000>;
+		};
+	};
+};

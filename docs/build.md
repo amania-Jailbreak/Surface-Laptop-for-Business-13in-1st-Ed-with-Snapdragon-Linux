@@ -5,7 +5,7 @@ The public build has four independent inputs:
 | Input | Source | Result |
 | --- | --- | --- |
 | Kernel | Linux source plus the neutral config | `Image`, modules, release |
-| Device tree | standalone board DTS plus overlay | base or Bluetooth DTB |
+| Device tree | measured Type-C DTB plus touchscreen/Bluetooth overlays | touchscreen or touchscreen+Bluetooth DTB |
 | Initramfs | OS-provided initramfs plus early Surface hooks | boot initramfs |
 | UKI metadata | neutral `os-release` and caller cmdline | EFI UKI |
 
@@ -21,8 +21,10 @@ Set `KERNEL_SOURCE`, `KERNEL_CONFIG`, `BASE_DTS`, `INITRD_BASE`,
 `FIRMWARE_SOURCE`, and `UKI_STUB` to port the builder to another host.
 
 `KERNEL_SOURCE`, `INITRD_BASE` and `FIRMWARE_SOURCE` have no default: the
-build fails fast when they are not exported. Example for an Ubuntu host that
-already installed its own arm64 kernel packages:
+full kernel/UKI build fails fast when they are not exported. The DTB-only
+target does not require them and can be run independently with
+`./build.sh dtb`. Example for an Ubuntu host that already installed its own
+arm64 kernel packages:
 
 ```sh
 export KERNEL_SOURCE=$HOME/src/linux

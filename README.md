@@ -39,10 +39,11 @@ initramfs files are ignored by default because they can exceed the normal
 100 MiB repository-file limit; `MANIFEST.json` and `SHA256SUMS` remain useful
 for transfer and recovery.
 
-The two UKIs are:
+The two UKIs both include the hardware-tested touchscreen configuration:
 
-- `surface-laptop-13-current.efi`: Type-C host DTB and the base initramfs.
-- `surface-laptop-13-bluetooth.efi`: the same hardware baseline with the
+- `surface-laptop-13-current.efi`: Type-C host and touchscreen DTB with the
+  base initramfs.
+- `surface-laptop-13-bluetooth.efi`: the same Type-C/touchscreen baseline with the
   WCN7850 UART child and early Bluetooth modules/firmware.
 
 The kernel release is deliberately neutral:
@@ -61,6 +62,8 @@ The kernel release is deliberately neutral:
 The hardware DTB uses host mode for both USB-C controllers. The Bluetooth
 overlay enables the GENI UART at `a98000`, creates a `qcom,wcn7850-bt` serdev
 child, and supplies the board PMU enable GPIO and regulator references.
+The touchscreen overlay enables the GENI I2C controller at `a80000` and uses
+the ACPI-confirmed HID descriptor register address `0`.
 
 ## Hardware validation
 
@@ -70,11 +73,12 @@ On the target machine, collect:
 bluetoothctl list
 rfkill list
 lsusb
+readlink /sys/bus/i2c/devices/1-0034/driver
 cat /proc/cmdline
-dmesg | grep -Ei 'dwc3|xhci|bluetooth|hci|qca|wcn7850'
+dmesg | grep -Ei 'dwc3|xhci|bluetooth|hci|qca|wcn7850|i2c_hid|hid-multitouch'
 ```
 
-### 2026-08-25 verified configuration
+### 2026-08-26 verified configuration
 
 A kernel built from this repository (`7.2.0-rc5-surface-laptop-13`) was booted
 on the target machine as a UKI together with the Bluetooth DTB above. The
@@ -86,6 +90,11 @@ the initramfs when the distribution installs `kernel/net/bluetooth`,
 
 Type-C host mode works with direct-attached storage. When booting from USB,
 load the `uas` module (or build it in) so second-stage storage is detected.
+
+The internal touchscreen was identified as HID-over-I2C `1FD2:4001` on
+`1-0034`. The WCN7850 Bluetooth controller and both USB-C host controllers
+were active in the same boot. See `docs/touchscreen.md` for the ACPI-derived
+descriptor-register value and failure signature.
 
 The Type-C test must still be repeated with the boot SSD and a second USB
 device in separate trials on untested units. Direct-attached storage has been

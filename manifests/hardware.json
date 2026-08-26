@@ -15,7 +15,8 @@
     "Wi-Fi",
     "battery and brightness reporting",
     "Type-C storage baseline",
-    "WCN7850 Bluetooth candidate"
+    "WCN7850 Bluetooth",
+    "MSHW0468 HID-over-I2C touchscreen"
   ],
   "known_limitations": [
     "Suspend is not a supported recovery path",
