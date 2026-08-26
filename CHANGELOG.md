@@ -7,6 +7,8 @@
 - mapped its Windows `QCOM0D09` USB host to DT node `usb@a200000`;
 - added a separate overlay and fingerprint UKI target without changing the
   hardware-tested default boot configuration;
+- enabled the controller's dedicated `phy@88e0000` after hardware testing
+  showed DWC3 core registration fails while that PHY remains disabled;
 - documented the remaining USB-enumeration and libfprint validation work.
 
 ## 2026-08-26 - touchscreen support

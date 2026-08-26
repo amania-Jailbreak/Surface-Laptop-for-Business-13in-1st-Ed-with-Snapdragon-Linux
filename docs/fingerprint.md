@@ -12,7 +12,10 @@ Its `_CRS` MMIO base is `0x0a200000`, which maps directly to
 `/soc@0/usb@a200000` in the board DT. The measured Linux baseline leaves this
 controller disabled, so the fingerprint reader cannot enumerate.
 
-`device-tree/overlays/fingerprint-usb.dtso` enables that internal USB2 host.
+`device-tree/overlays/fingerprint-usb.dtso` enables that internal USB2 host
+and its dedicated eUSB2 PHY at `0x088e0000`. Enabling only the controller
+leaves the PHY disabled and causes `dwc3-qcom` to defer with
+`failed to register DWC3 Core`.
 It does not contain or redistribute the proprietary Windows driver or
 firmware.
 

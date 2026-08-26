@@ -203,6 +203,7 @@ build_dtb() {
 	for candidate in "$fingerprint_dtb" "$bluetooth_fingerprint_dtb"; do
 		[[ "$(fdtget "$candidate" /soc@0/usb@a200000 status)" == okay ]] || die "fingerprint USB controller is disabled in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a200000 dr_mode)" == host ]] || die "fingerprint USB controller is not host mode in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/phy@88e0000 status)" == okay ]] || die "fingerprint eUSB2 PHY is disabled in $candidate"
 	done
 }
 

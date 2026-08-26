@@ -20,4 +20,12 @@
 			maximum-speed = "high-speed";
 		};
 	};
+
+	/* usb@a200000 references this dedicated eUSB2 PHY (phandle 0xbf). */
+	fragment@1 {
+		target-path = "/soc@0/phy@88e0000";
+		__overlay__ {
+			status = "okay";
+		};
+	};
 };
