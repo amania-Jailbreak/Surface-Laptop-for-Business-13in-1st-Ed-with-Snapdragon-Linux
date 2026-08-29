@@ -6,3 +6,20 @@ kernel/net/bluetooth/bluetooth.ko
 kernel/drivers/bluetooth/btbcm.ko
 kernel/drivers/bluetooth/btqca.ko
 kernel/drivers/bluetooth/hci_uart.ko
+
+# Optional desktop modules.  These are normally installed in the target
+# system's module tree; add them to the initramfs only when the root or an
+# early network mount needs them before switch_root.
+kernel/fs/smb/client/cifs.ko
+kernel/fs/nls/nls_utf8.ko
+kernel/drivers/net/wireguard/wireguard.ko
+kernel/net/ipv4/udp_tunnel.ko
+kernel/net/netfilter/nf_tables.ko
+kernel/net/netfilter/nf_nat.ko
+kernel/fs/overlayfs/overlayfs.ko
+kernel/fs/f2fs/f2fs.ko
+kernel/fs/xfs/xfs.ko
+kernel/fs/exfat/exfat.ko
+kernel/fs/ntfs3/ntfs3.ko
+kernel/fs/isofs/isofs.ko
+kernel/fs/udf/udf.ko

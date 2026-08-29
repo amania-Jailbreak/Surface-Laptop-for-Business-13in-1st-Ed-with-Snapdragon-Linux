@@ -17,7 +17,7 @@ The command line contains `root=UUID=CHANGE-ME` as a safe placeholder. A
 distribution integration must replace it with the UUID or label of its own
 root filesystem before deployment.
 
-Set `KERNEL_SOURCE`, `KERNEL_CONFIG`, `BASE_DTS`, `INITRD_BASE`,
+Set `KERNEL_SOURCE`, `KERNEL_CONFIG`, `KERNEL_CONFIG_FRAGMENT`, `BASE_DTS`, `INITRD_BASE`,
 `FIRMWARE_SOURCE`, and `UKI_STUB` to port the builder to another host.
 
 `KERNEL_SOURCE`, `INITRD_BASE` and `FIRMWARE_SOURCE` have no default: the
@@ -28,7 +28,14 @@ arm64 kernel packages:
 
 ```sh
 export KERNEL_SOURCE=$HOME/src/linux
+export KERNEL_CONFIG_FRAGMENT=$PWD/kernel/config/desktop.config
 export INITRD_BASE=/boot/initrd.img-7.2.0-rc5-surface-laptop-13
 export FIRMWARE_SOURCE=$HOME/firmware/qca-bluetooth
 ./build.sh uki
 ```
+
+The generated module tree contains the optional CIFS and WireGuard modules in
+addition to the Surface drivers. Install that module tree into the target OS
+with the distribution's normal module-packaging tools. Only modules needed
+before root discovery belong in the initramfs; CIFS and WireGuard can remain in
+the installed module tree for ordinary post-boot use.

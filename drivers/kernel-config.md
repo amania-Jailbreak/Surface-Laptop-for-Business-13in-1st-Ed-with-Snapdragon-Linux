@@ -1,7 +1,10 @@
 # Required kernel settings
 
-The full starting configuration is `kernel/config/base.config`. The following
-settings are the hardware-facing subset that must remain available:
+The full starting configuration is `kernel/config/base.config`. The build also
+merges `kernel/config/desktop.config`, which enables common desktop, removable
+storage, network, VPN, and filesystem support as modules where possible.
+
+The following settings are the hardware-facing subset that must remain available:
 
 ```text
 CONFIG_ARCH_QCOM=y
@@ -35,3 +38,18 @@ CONFIG_RD_GZIP=y
 The exact `m` versus `y` choice can vary with the kernel release. Any module
 needed before root discovery must be listed in
 `drivers/module-manifest.txt` and added to the initramfs.
+
+The desktop fragment deliberately leaves legacy SMB1, CIFS debug output, and
+WireGuard debug output disabled. A normal build must contain at least:
+
+```text
+CONFIG_CIFS=m
+CONFIG_WIREGUARD=m
+CONFIG_NET_UDP_TUNNEL=m
+CONFIG_NLS_UTF8=m
+```
+
+The fragment is merged with the source tree's Kconfig database and then passed
+through `olddefconfig`. This keeps the same repository usable with nearby
+kernel releases: a symbol that does not exist in an older release is resolved
+by that release's Kconfig rules instead of being copied into the final config.

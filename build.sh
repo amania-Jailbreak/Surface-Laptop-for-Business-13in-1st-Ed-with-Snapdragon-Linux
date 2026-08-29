@@ -18,6 +18,7 @@ KERNEL_SOURCE=${KERNEL_SOURCE:-}
 INITRD_BASE=${INITRD_BASE:-}
 FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
 KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
+KERNEL_CONFIG_FRAGMENT=${KERNEL_CONFIG_FRAGMENT:-$PUBLIC_DIR/kernel/config/desktop.config}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dtb}
 UKI_STUB=${UKI_STUB:-/usr/lib/systemd/boot/efi/linuxaa64.efi.stub}
@@ -69,7 +70,7 @@ EOF
 check_inputs() {
 	local f
 	need bash; need find; need dtc; need fdtoverlay; need fdtget
-	for f in "$KERNEL_CONFIG" "$BASE_DTS" "$BASE_DTB_INPUT"; do
+	for f in "$KERNEL_CONFIG" "$KERNEL_CONFIG_FRAGMENT" "$BASE_DTS" "$BASE_DTB_INPUT"; do
 		[[ -f "$f" ]] || die "input not found: $f"
 	done
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" ]] || die "public touchscreen overlay missing"
@@ -112,6 +113,31 @@ apply_public_patches() {
 	done
 }
 
+merge_kernel_config() {
+	local merge_config="$KERNEL_WORK_SOURCE/scripts/kconfig/merge_config.sh"
+	if [[ -x "$merge_config" ]]; then
+		"$merge_config" -m -O "$KERNEL_OUT" "$KERNEL_OUT/.config" "$KERNEL_CONFIG_FRAGMENT"
+	else
+		# A few vendor source exports omit merge_config.sh.  The fragment is
+		# deliberately additive, so appending it before olddefconfig is safe.
+		cat "$KERNEL_CONFIG_FRAGMENT" >>"$KERNEL_OUT/.config"
+	fi
+}
+
+check_kernel_features() {
+	local config_file="$1"
+	local symbol
+	for symbol in CIFS WIREGUARD; do
+		grep -Eq "^CONFIG_${symbol}=(y|m)$" "$config_file" \
+			|| die "required kernel feature is disabled: CONFIG_${symbol}"
+	done
+	for symbol in CIFS_DEBUG CIFS_DEBUG2 CIFS_DEBUG_DUMP_KEYS WIREGUARD_DEBUG DRM_PANIC_DEBUG DRM_DEBUG_DP_MST_TOPOLOGY_REFS; do
+		if grep -Eq "^CONFIG_${symbol}=(y|m)$" "$config_file"; then
+			die "verbose diagnostic feature is enabled: CONFIG_${symbol}"
+		fi
+	done
+}
+
 build_kernel() {
 	need make; need aarch64-linux-gnu-gcc
 	[[ -f "$KERNEL_SOURCE/Makefile" ]] || die "kernel source directory not found: $KERNEL_SOURCE"
@@ -138,6 +164,7 @@ build_kernel() {
 	rm -rf "$KERNEL_OUT" "$MODULE_OUT"
 	mkdir -p "$KERNEL_OUT" "$MODULE_OUT"
 	cp "$KERNEL_CONFIG" "$KERNEL_OUT/.config"
+	merge_kernel_config
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 	if grep -q '^CONFIG_LOCALVERSION=' "$KERNEL_OUT/.config"; then
 		sed -i -E 's#^CONFIG_LOCALVERSION=.*#CONFIG_LOCALVERSION="-surface-laptop-13"#' "$KERNEL_OUT/.config"
@@ -161,6 +188,7 @@ if grep -q '^CONFIG_LOCALVERSION_AUTO=' "$KERNEL_OUT/.config"; then
 	krel=$(make -s -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- kernelrelease)
 	cp "$KERNEL_OUT/arch/arm64/boot/Image" "$kernel_image"
 	cp "$KERNEL_OUT/.config" "$kernel_config"
+	check_kernel_features "$kernel_config"
 	printf '%s\n' "$krel" >"$kernel_release"
 	[[ "$krel" == *surface-laptop-13* ]] || die "kernel release is not neutral: $krel"
 	printf 'kernel release: %s\n' "$krel"
@@ -246,6 +274,9 @@ build_uki() {
 	local image="$1" initrd="$2" output="$3" dtb="$4"
 	[[ -f "$image" && -f "$initrd" && -f "$dtb" ]] || die "UKI input missing"
 	[[ -f "$UKI_STUB" ]] || die "UKI stub not found: $UKI_STUB"
+	if grep -Eq '(^|[[:space:]])(drm\.debug|ignore_loglevel)(=|[[:space:]]|$)' "$CMDLINE"; then
+		die "debug logging option found in UKI command line"
+	fi
 	mkdir -p "$(dirname "$output")"
 	ukify build --stub="$UKI_STUB" --linux="$image" --initrd="$initrd" \
 		--devicetree="$dtb" --cmdline="@$CMDLINE" --os-release="@$OS_RELEASE" \
