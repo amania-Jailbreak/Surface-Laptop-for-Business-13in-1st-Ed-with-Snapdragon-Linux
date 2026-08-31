@@ -1,5 +1,6 @@
 # Build outputs and local recovery sets are never committed.
 SURFACE-CURRENT/
+build/
 *.efi
 *.dtb
 *.img

@@ -6,11 +6,34 @@ PUBLIC_DIR="$ROOT_DIR"
 # Kernel/Kconfig builds need symlinks, which are not available on some SMB
 # mounts. Keep scratch data local while committing only final components.
 WORK_DIR=${SURFACE_WORK_DIR:-/tmp/surface-laptop-13-build}
-CURRENT_DIR="$ROOT_DIR/SURFACE-CURRENT"
+CURRENT_DIR=${SURFACE_OUTPUT_DIR:-$ROOT_DIR/SURFACE-CURRENT}
 
 die() { printf 'ERROR: %s\n' "$*" >&2; exit 1; }
 log() { printf '\n==> %s\n' "$*"; }
 need() { command -v "$1" >/dev/null 2>&1 || die "required command not found: $1"; }
+
+resolve_ukify() {
+	if [[ -n "${UKIFY:-}" ]]; then
+		if [[ "$UKIFY" == */* ]]; then
+			[[ -x "$UKIFY" ]] || die "ukify executable not found: $UKIFY"
+		else
+			command -v "$UKIFY" >/dev/null 2>&1 || die "required command not found: $UKIFY"
+		fi
+		return
+	fi
+	UKIFY=$(command -v ukify 2>/dev/null || true)
+	if [[ -n "$UKIFY" ]]; then
+		return
+	fi
+	local candidate
+	for candidate in /usr/lib/systemd/ukify /lib/systemd/ukify; do
+		if [[ -x "$candidate" ]]; then
+			UKIFY="$candidate"
+			return
+		fi
+	done
+	die "required command not found: ukify (set UKIFY to its executable path)"
+}
 
 # All build inputs are supplied by the environment or by an OS integration.
 # Nothing in this script references a private development workspace.
@@ -21,6 +44,7 @@ KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
 KERNEL_CONFIG_FRAGMENT=${KERNEL_CONFIG_FRAGMENT:-$PUBLIC_DIR/kernel/config/desktop.config}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dtb}
+UKIFY=${UKIFY:-}
 UKI_STUB=${UKI_STUB:-/usr/lib/systemd/boot/efi/linuxaa64.efi.stub}
 KERNEL_JOBS=${KERNEL_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
 
@@ -70,9 +94,14 @@ EOF
 check_inputs() {
 	local f
 	need bash; need find; need dtc; need fdtoverlay; need fdtget
-	for f in "$KERNEL_CONFIG" "$KERNEL_CONFIG_FRAGMENT" "$BASE_DTS" "$BASE_DTB_INPUT"; do
+	for f in "$KERNEL_CONFIG" "$KERNEL_CONFIG_FRAGMENT" "$BASE_DTS"; do
 		[[ -f "$f" ]] || die "input not found: $f"
 	done
+	if [[ "${REBUILD_BASE_DTB:-0}" == 1 || ! -f "$BASE_DTB_INPUT" ]]; then
+		printf 'base DTB: rebuild from DTS (%s)\n' "$BASE_DTS"
+	else
+		printf 'base DTB input: %s\n' "$BASE_DTB_INPUT"
+	fi
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" ]] || die "public touchscreen overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" ]] || die "public Bluetooth overlay missing"
 	[[ -f "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" ]] || die "public fingerprint USB overlay missing"
@@ -89,7 +118,10 @@ check_inputs() {
 
 check_full_inputs() {
 	check_inputs
-	need make; need ukify; need python3; need sha256sum; need strings; need rg
+	need make; resolve_ukify; need python3; need sha256sum; need strings; need rg
+	[[ -n "$KERNEL_SOURCE" ]] || die "KERNEL_SOURCE is not set"
+	[[ -n "$INITRD_BASE" ]] || die "INITRD_BASE is not set"
+	[[ -n "$FIRMWARE_SOURCE" ]] || die "FIRMWARE_SOURCE is not set"
 	local f
 	for f in "$KERNEL_SOURCE/Makefile" "$INITRD_BASE" "$UKI_STUB"; do
 		[[ -f "$f" ]] || die "input not found: $f"
@@ -153,11 +185,14 @@ build_kernel() {
 			find "$KERNEL_WORK_SOURCE" -depth -mindepth 1 -delete
 			rmdir "$KERNEL_WORK_SOURCE"
 		fi
-		# Hard-linked files keep this fast on large local checkouts. mrproper and
-		# patch replace/unlink files in the view, leaving the user's source tree
-		# untouched.
-		cp -al "$KERNEL_SOURCE" "$KERNEL_WORK_SOURCE"
-		make -C "$KERNEL_WORK_SOURCE" mrproper >/dev/null
+		# Use independent files here. Applying a public patch to hard-linked files
+		# would also modify the user's kernel checkout.
+		mkdir -p "$KERNEL_WORK_SOURCE"
+		# The source checkout's Git history can be several GiB and is not needed
+		# by make or by the public patch application.
+		tar -C "$KERNEL_SOURCE" --exclude=.git -cf - . |
+			tar -C "$KERNEL_WORK_SOURCE" -xf -
+		make -C "$KERNEL_WORK_SOURCE" ARCH=arm64 mrproper >/dev/null
 		touch "$KERNEL_WORK_SOURCE/.surface-source-prepared"
 	fi
 	log "Preparing neutral kernel configuration"
@@ -199,10 +234,12 @@ build_dtb() {
 	mkdirs
 	log "Building Type-C, touchscreen, Bluetooth, and fingerprint device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
-	# Prefer the measured Type-C baseline DTB. The standalone DTS is retained
-	# for inspection and can be selected explicitly when rebuilding it.
-	if [[ "${REBUILD_BASE_DTB:-0}" == 1 ]]; then
-		dtc -@ -I dts -O dtb -o "$raw_base_dtb" "$BASE_DTS" >"$DTB_OUT/base-dtc.log" 2>&1
+	# Prefer the measured Type-C baseline DTB when one is supplied. The public
+	# repository intentionally does not track that binary, so a clean checkout
+	# falls back to rebuilding the retained DTS automatically.
+	if [[ "${REBUILD_BASE_DTB:-0}" == 1 || ! -f "$BASE_DTB_INPUT" ]]; then
+		printf 'rebuilt base DTB from %s\n' "$BASE_DTS" >"$DTB_OUT/base-dtc.log"
+		dtc -@ -I dts -O dtb -o "$raw_base_dtb" "$BASE_DTS" >>"$DTB_OUT/base-dtc.log" 2>&1
 	else
 		cp "$BASE_DTB_INPUT" "$raw_base_dtb"
 		printf 'copied measured base DTB from %s\n' "$BASE_DTB_INPUT" >"$DTB_OUT/base-dtc.log"
@@ -270,7 +307,7 @@ build_initramfs() {
 }
 
 build_uki() {
-	need ukify; need file
+	resolve_ukify; need file
 	local image="$1" initrd="$2" output="$3" dtb="$4"
 	[[ -f "$image" && -f "$initrd" && -f "$dtb" ]] || die "UKI input missing"
 	[[ -f "$UKI_STUB" ]] || die "UKI stub not found: $UKI_STUB"
@@ -278,7 +315,7 @@ build_uki() {
 		die "debug logging option found in UKI command line"
 	fi
 	mkdir -p "$(dirname "$output")"
-	ukify build --stub="$UKI_STUB" --linux="$image" --initrd="$initrd" \
+	"$UKIFY" build --stub="$UKI_STUB" --linux="$image" --initrd="$initrd" \
 		--devicetree="$dtb" --cmdline="@$CMDLINE" --os-release="@$OS_RELEASE" \
 		--output="$output"
 	file "$output" | grep -Eq 'PE32\\+.*(Aarch64|ARM64|ARM aarch64)' || die "not an ARM64 UKI: $output"
@@ -408,12 +445,12 @@ verify() {
 	while IFS= read -r -d '' f; do
 		case "$f" in
 			*/.work/*) continue ;;
-			*/SURFACE-CURRENT/uki/*.efi|*/SURFACE-CURRENT/initramfs/*.img) ;;
+			"$CURRENT_DIR"/uki/*.efi|"$CURRENT_DIR"/initramfs/*.img) ;;
 			*) [[ $(stat -c '%s' "$f") -le 104857600 ]] || die "file exceeds 100 MiB Git limit: $f" ;;
 		esac
 	done < <(find "$PUBLIC_DIR" "$CURRENT_DIR" -type f -print0)
 	if find "$CURRENT_DIR" -type f -name '*.img' ! -path "$CURRENT_DIR/initramfs/*" -print -quit | grep -q .; then
-		die "non-initramfs disk image found in SURFACE-CURRENT"
+		die "non-initramfs disk image found in $CURRENT_DIR"
 	fi
 	if [[ -f "$CURRENT_DIR/MANIFEST.json" ]]; then
 		python3 -m json.tool "$CURRENT_DIR/MANIFEST.json" >/dev/null

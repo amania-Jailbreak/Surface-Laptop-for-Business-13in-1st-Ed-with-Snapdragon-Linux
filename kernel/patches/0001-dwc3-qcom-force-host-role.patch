@@ -7,14 +7,13 @@ device-tree-gated workaround for bring-up kernels while the firmware behavior
 is investigated.
 
 ---
- drivers/usb/dwc3/drd.c | 6 ++++++
- 1 file changed, 6 insertions(+)
+ drivers/usb/dwc3/drd.c | 7 +++++++
+ 1 file changed, 7 insertions(+)
 
 diff --git a/drivers/usb/dwc3/drd.c b/drivers/usb/dwc3/drd.c
-index 000000000000..000000000000 100644
 --- a/drivers/usb/dwc3/drd.c
 +++ b/drivers/usb/dwc3/drd.c
-@@ -450,6 +450,12 @@ static int dwc3_usb_role_switch_set(struct usb_role_switch *sw,
+@@ -450,6 +450,13 @@ static int dwc3_usb_role_switch_set(struct usb_role_switch *sw,
  	struct dwc3 *dwc = usb_role_switch_get_drvdata(sw);
  	u32 mode;
  

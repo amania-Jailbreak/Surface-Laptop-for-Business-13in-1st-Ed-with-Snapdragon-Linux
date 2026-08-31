@@ -1,0 +1,1 @@
+root=UUID=1488d604-ef90-49d6-ad41-276330a2da12 rootfstype=ext4 rootwait rw quiet splash apparmor.mode=complain sbsa_gwdt.timeout=300 panic=0 cma=128M
