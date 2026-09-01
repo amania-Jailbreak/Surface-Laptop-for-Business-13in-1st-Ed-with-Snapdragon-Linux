@@ -44,9 +44,22 @@ KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
 KERNEL_CONFIG_FRAGMENT=${KERNEL_CONFIG_FRAGMENT:-$PUBLIC_DIR/kernel/config/desktop.config}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dtb}
+EL2_DTS=${EL2_DTS:-$PUBLIC_DIR/device-tree/overlays/x1e-el2.dtso}
 UKIFY=${UKIFY:-}
 UKI_STUB=${UKI_STUB:-/usr/lib/systemd/boot/efi/linuxaa64.efi.stub}
 KERNEL_JOBS=${KERNEL_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
+
+# kbuild changes directory before interpreting O= and INSTALL_MOD_PATH.
+# Normalize caller-supplied relative scratch paths first, otherwise those
+# paths are interpreted a second time below the copied kernel source tree.
+case "$WORK_DIR" in
+	/*) ;;
+	*) WORK_DIR="$ROOT_DIR/$WORK_DIR" ;;
+esac
+case "$CURRENT_DIR" in
+	/*) ;;
+	*) CURRENT_DIR="$ROOT_DIR/$CURRENT_DIR" ;;
+esac
 
 KERNEL_OUT="$WORK_DIR/kernel"
 KERNEL_WORK_SOURCE="$WORK_DIR/kernel-source"
@@ -61,6 +74,7 @@ kernel_image="$KERNEL_OUT/Image"
 kernel_config="$KERNEL_OUT/config"
 kernel_release="$KERNEL_OUT/release"
 base_dtb="$DTB_OUT/surface-laptop-13-current.dtb"
+el2_dtb="$DTB_OUT/surface-laptop-13-el2.dtb"
 bluetooth_dtb="$DTB_OUT/surface-laptop-13-bluetooth.dtb"
 fingerprint_dtb="$DTB_OUT/surface-laptop-13-fingerprint.dtb"
 bluetooth_fingerprint_dtb="$DTB_OUT/surface-laptop-13-bluetooth-fingerprint.dtb"
@@ -94,7 +108,7 @@ EOF
 check_inputs() {
 	local f
 	need bash; need find; need dtc; need fdtoverlay; need fdtget
-	for f in "$KERNEL_CONFIG" "$KERNEL_CONFIG_FRAGMENT" "$BASE_DTS"; do
+	for f in "$KERNEL_CONFIG" "$KERNEL_CONFIG_FRAGMENT" "$BASE_DTS" "$EL2_DTS"; do
 		[[ -f "$f" ]] || die "input not found: $f"
 	done
 	if [[ "${REBUILD_BASE_DTB:-0}" == 1 || ! -f "$BASE_DTB_INPUT" ]]; then
@@ -112,7 +126,7 @@ check_inputs() {
 	else
 		printf 'container runtime: unavailable (native build remains supported)\n'
 	fi
-	printf 'config: %s\nDT source: %s\n' "$KERNEL_CONFIG" "$BASE_DTS"
+	printf 'config: %s\nDT source: %s\nEL2 overlay: %s\n' "$KERNEL_CONFIG" "$BASE_DTS" "$EL2_DTS"
 	[[ -z "$KERNEL_SOURCE" ]] || printf 'kernel source: %s\n' "$KERNEL_SOURCE"
 }
 
@@ -244,13 +258,16 @@ build_dtb() {
 		cp "$BASE_DTB_INPUT" "$raw_base_dtb"
 		printf 'copied measured base DTB from %s\n' "$BASE_DTB_INPUT" >"$DTB_OUT/base-dtc.log"
 	fi
+	local el2_overlay="$DTB_OUT/x1e-el2.dtbo"
 	local touchscreen_overlay="$DTB_OUT/touchscreen.dtbo"
 	local bluetooth_overlay="$DTB_OUT/bluetooth.dtbo"
 	local fingerprint_overlay="$DTB_OUT/fingerprint-usb.dtbo"
+	dtc -@ -I dts -O dtb -o "$el2_overlay" "$EL2_DTS" >"$DTB_OUT/el2-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$touchscreen_overlay" "$PUBLIC_DIR/device-tree/overlays/touchscreen.dtso" >"$DTB_OUT/touchscreen-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$fingerprint_overlay" "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" >"$DTB_OUT/fingerprint-dtc.log" 2>&1
 	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$touchscreen_overlay"
+	fdtoverlay -i "$base_dtb" -o "$el2_dtb" "$el2_overlay"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
 	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
@@ -262,6 +279,18 @@ build_dtb() {
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 compatible)" == hid-over-i2c ]] || die "touchscreen node is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "touchscreen HID descriptor address is not zero in $candidate"
 	done
+	for property in \
+		"/soc@0/ufshc@1d84000 status okay" \
+		"/soc@0/phy@1d80000 status okay" \
+		"/soc@0/gpu@3d00000/zap-shader status disabled" \
+		"/soc@0/iommu@15400000 status okay" \
+		"/soc@0/watchdog@1c840000 status disabled"; do
+		set -- $property
+		[[ "$(fdtget "$el2_dtb" "$1" "$2")" == "$3" ]] || die "EL2 DTB property is not $3: $1 $2"
+	done
+	[[ "$(fdtget "$el2_dtb" /chosen dtbhack-el2-overlay)" == x1e-el2 ]] || die "EL2 DTB marker is missing"
+	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 0 is not host"
+	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 1 is not host"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth compatible is unexpected"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth max-speed)" == 3200000 ]] || die "Bluetooth UART speed is unexpected"
@@ -401,6 +430,7 @@ package_artifacts() {
 	cp "$kernel_config" "$CURRENT_DIR/kernel/config"
 	cp "$kernel_release" "$CURRENT_DIR/kernel/release"
 	cp "$base_dtb" "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb"
+	cp "$el2_dtb" "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb"
 	cp "$bluetooth_dtb" "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb"
 	cp "$current_initrd" "$CURRENT_DIR/initramfs/surface-laptop-13-current.img"
 	cp "$bluetooth_initrd" "$CURRENT_DIR/initramfs/surface-laptop-13-bluetooth.img"
@@ -434,9 +464,15 @@ verify() {
 		if strings "$f" | grep -qi "$forbidden"; then die "forbidden name found in binary: $f"; fi
 	done
 	[[ -f "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" ]] || die "current DTB is missing"
+	[[ -f "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" ]] || die "EL2 DTB is missing"
 	[[ -f "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" ]] || die "Bluetooth DTB is missing"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "current DTB USB-C port 0 is not host"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "current DTB USB-C port 1 is not host"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/ufshc@1d84000 status)" == okay ]] || die "current DTB UFS controller is disabled"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /chosen dtbhack-el2-overlay)" == x1e-el2 ]] || die "EL2 DTB marker is missing"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/gpu@3d00000/zap-shader status)" == disabled ]] || die "EL2 zap shader is not disabled"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/iommu@15400000 status)" == okay ]] || die "EL2 PCIe SMMU is not enabled"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/watchdog@1c840000 status)" == disabled ]] || die "EL2 SBSA watchdog is not disabled"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "current DTB touchscreen HID descriptor address is not zero"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "Bluetooth DTB touchscreen HID descriptor address is not zero"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is not enabled"

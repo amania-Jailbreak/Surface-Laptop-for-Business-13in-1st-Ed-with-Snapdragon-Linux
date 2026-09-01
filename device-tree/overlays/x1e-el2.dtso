@@ -1,0 +1,52 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/*
+ * Qualcomm X1 EL2 changes.
+ *
+ * The Qualcomm firmware normally starts UEFI/Linux in EL1.  When Secure
+ * Launch hands EL2 to Linux, the PCIe SMMU must be owned by Linux and the
+ * zap shader and SBSA watchdog must not be accessed by the EL2 kernel.
+ * Keep this as an overlay so the normal EL1 DTB remains usable.
+ */
+
+/dts-v1/;
+/plugin/;
+
+/ {
+	compatible = "qcom,x1e80100";
+};
+
+&{/} {
+	chosen {
+		dtbhack-el2-overlay = "x1e-el2";
+	};
+};
+
+&{/soc@0/gpu@3d00000/zap-shader} {
+	status = "disabled";
+};
+
+&{/soc@0} {
+	pcie_smmu: iommu@15400000 {
+		compatible = "arm,smmu-v3";
+		reg = <0 0x15400000 0 0x80000>;
+		interrupts = <0 /* GIC_SPI */ 138 1 /* IRQ_TYPE_EDGE_RISING */>,
+				     <0 /* GIC_SPI */ 134 1 /* IRQ_TYPE_EDGE_RISING */>,
+				     <0 /* GIC_SPI */ 136 1 /* IRQ_TYPE_EDGE_RISING */>;
+		interrupt-names = "eventq", "gerror", "cmdq-sync";
+		#iommu-cells = <1>;
+		dma-coherent;
+		status = "okay";
+	};
+};
+
+&{/soc@0/pci@1bf8000} {
+	iommu-map = <0 &pcie_smmu 0x60000 0x10000>;
+};
+
+&{/soc@0/pci@1c08000} {
+	iommu-map = <0 &pcie_smmu 0x40000 0x10000>;
+};
+
+&{/soc@0/watchdog@1c840000} {
+	status = "disabled";
+};

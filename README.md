@@ -56,6 +56,48 @@ The build produces three UKIs from one kernel:
 Kernel version string: `7.2.0-rc5-surface-laptop-13`.
 
 
+## KVM / EL2 boot
+
+The Snapdragon X firmware normally enters Linux in EL1, so enabling
+`CONFIG_KVM` alone is not sufficient. The KVM path uses the checked-in X1 EL2
+overlay, a separate GRUB entry, and a Secure Launch EFI image built by
+`tools/build-surface-kvm-efi.sh`. The supplied Microsoft `tcblaunch.exe` is
+required by that Secure Launch step; Secure Boot must be disabled unless the
+custom launcher is signed.
+
+Build the EFI launcher from a normal Proxmox EFI image and add the optional
+EL2 entry to a patched installer ISO as follows:
+
+```sh
+export KERNEL_SOURCE=/root/linux
+export KERNEL_APPLY_PATCHES=1
+export SURFACE_OUTPUT_DIR=build
+export SURFACE_WORK_DIR=build/.work
+./build.sh kernel
+./build.sh dtb
+
+./tools/build-surface-kvm-efi.sh \
+  --base-efi build/surface-normal-efi.img \
+  --output build/surface-kvm-efi.img \
+  --tcb attachments/tcblaunch.exe \
+  --slbounce-source /path/to/slbounce
+
+./build-proxmox-iso.sh \
+  --iso proxmox-ve_9.2-1-arm64.iso \
+  --output build/proxmox-ve_9.2-1-arm64-surface-kvm.iso \
+  --kernel-image build/.work/kernel/Image \
+  --dtb build/.work/dtb/surface-laptop-13-current.dtb \
+  --el2-dtb build/.work/dtb/surface-laptop-13-el2.dtb \
+  --efi-image build/surface-kvm-efi.img \
+  --no-initrd-modules
+```
+
+`--qebspil`/`--qebspil-source` can add the optional Qualcomm DSP pre-boot
+loader, and `--firmware-tree` copies an additional firmware tree into the EFI
+image. The normal EL1 DTB remains separate so non-KVM boots and hardware
+variants can continue to use their own menu entries.
+
+
 ## Using on your own install
 
 1. Build or reuse a kernel from `kernel/config/base.config` (source revision

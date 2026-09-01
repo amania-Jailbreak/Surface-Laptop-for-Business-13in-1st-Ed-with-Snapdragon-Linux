@@ -11,6 +11,9 @@ KERNEL_IMAGE=${KERNEL_IMAGE:-$WORK_DIR/kernel/Image}
 DTB_FILE=${DTB_FILE:-$WORK_DIR/dtb/surface-laptop-13-current.dtb}
 DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
+EFI_IMAGE=${EFI_IMAGE:-}
+EL2_DTB_FILE=${EL2_DTB_FILE:-}
+EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
 KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1
@@ -58,6 +61,9 @@ Options:
   --kernel-image FILE Use an existing ARM64 kernel Image instead of building one.
   --dtb FILE          Use an existing Surface DTB instead of building one.
   --dtb-name NAME     Name of the DTB inside /boot (default: current DTB name).
+  --el2-dtb FILE      Add a separate EL2/KVM DTB and installer menu entries.
+  --el2-dtb-name NAME Name of the EL2 DTB inside /boot (default: surface-laptop-13-el2.dtb).
+  --efi-image FILE    Replace the ISO EFI image (for example one containing slbounce).
   --initrd FILE       Replace the ISO initrd with this archive.
   --no-initrd-modules Keep the selected initrd without adding built modules.
   --work DIR          Scratch directory (default: ./build/.work).
@@ -104,6 +110,21 @@ parse_args() {
 				shift
 				(($#)) || die "--dtb-name needs a name"
 				DTB_NAME=$1
+				;;
+			--el2-dtb)
+				shift
+				(($#)) || die "--el2-dtb needs a file"
+				EL2_DTB_FILE=$1
+				;;
+			--el2-dtb-name)
+				shift
+				(($#)) || die "--el2-dtb-name needs a name"
+				EL2_DTB_NAME=$1
+				;;
+			--efi-image)
+				shift
+				(($#)) || die "--efi-image needs a file"
+				EFI_IMAGE=$1
 				;;
 			--initrd)
 				shift
@@ -196,6 +217,32 @@ print(f"patched GRUB entries: {patched}")
 PY
 }
 
+append_el2_grub_entries() {
+	local grub_cfg=$1
+	local dtb_name=$2
+
+	cat >>"$grub_cfg" <<EOF
+
+menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --class debian --class gnu-linux --class gnu --class os {
+    echo    'Loading Proxmox VE Installer with Surface EL2/KVM ...'
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1
+    devicetree /boot/$dtb_name
+    echo    'Loading initial ramdisk ...'
+    initrd  /boot/initrd.img
+}
+
+menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --class debian --class gnu-linux --class gnu --class os {
+    set background_color=black
+    echo    'Loading Proxmox VE Console Installer with Surface EL2/KVM ...'
+    gfxpayload=800x600x16,800x600
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1 proxtui
+    devicetree /boot/$dtb_name
+    echo    'Loading initial ramdisk ...'
+    initrd  /boot/initrd.img
+}
+EOF
+}
+
 augment_initrd_with_modules() {
 	local initrd="$1"
 	local module_base="$WORK_DIR/modules/lib/modules"
@@ -266,6 +313,7 @@ rebuild_iso() {
 verify_iso() {
 	local output_iso=$1
 	local dtb_path=$2
+	local el2_dtb_path=${3:-}
 	local listing
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
 	listing=$(mktemp "$WORK_DIR/iso-list.XXXXXX")
@@ -273,6 +321,9 @@ verify_iso() {
 	grep -Fq "Path = boot/linux26" "$listing" || die "patched kernel is missing from output ISO"
 	grep -Fq "Path = boot/initrd.img" "$listing" || die "installer initrd is missing from output ISO"
 	grep -Fq "Path = boot/$dtb_path" "$listing" || die "Surface DTB is missing from output ISO"
+	if [[ -n "$el2_dtb_path" ]]; then
+		grep -Fq "Path = boot/$el2_dtb_path" "$listing" || die "EL2 DTB is missing from output ISO"
+	fi
 	xorriso -indev "$output_iso" -report_el_torito as_mkisofs >/dev/null
 	rm -f -- "$listing"
 }
@@ -310,12 +361,25 @@ main() {
 	if [[ -n "$INITRD_FILE" ]]; then
 		INITRD_FILE=$(absolute_path "$INITRD_FILE")
 	fi
+	if [[ -n "$EFI_IMAGE" ]]; then
+		EFI_IMAGE=$(absolute_path "$EFI_IMAGE")
+	fi
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		EL2_DTB_FILE=$(absolute_path "$EL2_DTB_FILE")
+	fi
 
 	[[ -f "$INPUT_ISO" ]] || die "input ISO not found: $INPUT_ISO"
 	[[ "$INPUT_ISO" != "$OUTPUT_ISO" ]] || die "input and output ISO must be different files"
 	[[ "$DTB_NAME" != */* && "$DTB_NAME" != "" ]] || die "--dtb-name must be a file name without '/': $DTB_NAME"
+	[[ "$EL2_DTB_NAME" != */* && "$EL2_DTB_NAME" != "" ]] || die "--el2-dtb-name must be a file name without '/': $EL2_DTB_NAME"
 	if [[ -n "$INITRD_FILE" ]]; then
 		[[ -f "$INITRD_FILE" ]] || die "initrd not found: $INITRD_FILE"
+	fi
+	if [[ -n "$EFI_IMAGE" ]]; then
+		[[ -f "$EFI_IMAGE" ]] || die "EFI image not found: $EFI_IMAGE"
+	fi
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		[[ -f "$EL2_DTB_FILE" ]] || die "EL2 DTB not found: $EL2_DTB_FILE"
 	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
@@ -329,10 +393,19 @@ main() {
 	xorriso -osirrox on -indev "$INPUT_ISO" -extract / "$STAGE_DIR"
 	[[ -f "$STAGE_DIR/boot/grub/grub.cfg" ]] || die "Proxmox GRUB config not found in extracted ISO"
 	[[ -f "$STAGE_DIR/efi.img" ]] || die "EFI boot image not found in extracted ISO"
+	# xorriso preserves ISO read-only mode bits.  The stage is disposable, so
+	# make it writable before replacing boot components or GRUB configuration.
+	chmod -R u+rwX -- "$STAGE_DIR"
 
 	log "Installing Surface kernel and DTB into ISO"
 	cp --preserve=mode,timestamps "$KERNEL_IMAGE" "$STAGE_DIR/boot/linux26"
 	cp --preserve=mode,timestamps "$DTB_FILE" "$STAGE_DIR/boot/$DTB_NAME"
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		cp --preserve=mode,timestamps "$EL2_DTB_FILE" "$STAGE_DIR/boot/$EL2_DTB_NAME"
+	fi
+	if [[ -n "$EFI_IMAGE" ]]; then
+		cp --preserve=mode,timestamps "$EFI_IMAGE" "$STAGE_DIR/efi.img"
+	fi
 	if [[ -n "$INITRD_FILE" ]]; then
 		cp --preserve=mode,timestamps "$INITRD_FILE" "$STAGE_DIR/boot/initrd.img"
 	fi
@@ -340,10 +413,13 @@ main() {
 		augment_initrd_with_modules "$STAGE_DIR/boot/initrd.img"
 	fi
 	patch_grub_config "$STAGE_DIR/boot/grub/grub.cfg" "$DTB_NAME"
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		append_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg" "$EL2_DTB_NAME"
+	fi
 
 	rm -f -- "$OUTPUT_ISO"
 	rebuild_iso "$INPUT_ISO" "$OUTPUT_ISO" "$STAGE_DIR"
-	verify_iso "$OUTPUT_ISO" "$DTB_NAME"
+	verify_iso "$OUTPUT_ISO" "$DTB_NAME" "${EL2_DTB_FILE:+$EL2_DTB_NAME}"
 	printf '\nPatched ISO: %s\n' "$OUTPUT_ISO"
 	file "$OUTPUT_ISO"
 }
