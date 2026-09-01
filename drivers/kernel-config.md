@@ -15,8 +15,15 @@ CONFIG_USB_DWC3=y
 CONFIG_USB_DWC3_QCOM=y
 CONFIG_USB_DWC3_DUAL_ROLE=y
 CONFIG_USB_XHCI_HCD=y
+CONFIG_USB_XHCI_PLATFORM=y
+CONFIG_DRM_AUX_BRIDGE=y
+CONFIG_PHY_QCOM_QMP_COMBO=y
+CONFIG_PHY_QCOM_USB_SNPS_FEMTO_V2=y
 CONFIG_USB_STORAGE=y
-CONFIG_USB_UAS=m
+CONFIG_USB_UAS=y
+CONFIG_SCSI=y
+CONFIG_BLK_DEV_SD=y
+CONFIG_EXT4_FS=y
 CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_SERDEV=y
@@ -41,9 +48,11 @@ CONFIG_BLK_DEV_INITRD=y
 CONFIG_RD_GZIP=y
 ```
 
-The exact `m` versus `y` choice can vary with the kernel release. Any module
-needed before root discovery must be listed in
-`drivers/module-manifest.txt` and added to the initramfs.
+The USB-root path is intentionally built in. In particular, DWC3 must not
+wait for the QMP combo PHY or its AUX bridge dependency to be loaded from the
+same USB disk that DWC3 is responsible for discovering. Optional hardware and
+desktop features may remain modules and are listed in
+`drivers/module-manifest.txt` when the initramfs needs them.
 
 The desktop fragment deliberately leaves legacy SMB1, CIFS debug output, and
 WireGuard debug output disabled. A normal build must contain at least:

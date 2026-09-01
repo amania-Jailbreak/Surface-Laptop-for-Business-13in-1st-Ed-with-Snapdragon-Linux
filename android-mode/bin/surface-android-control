@@ -1,0 +1,293 @@
+#!/usr/bin/env python3
+"""Small allow-listed host control service for the Android Mode app."""
+
+from __future__ import annotations
+
+import base64
+import json
+import os
+import re
+import socket
+import subprocess
+import sys
+from typing import Any
+
+
+MAX_REQUEST = 8192
+ADDRESS_RE = re.compile(r"^[0-9A-Fa-f]{2}(?::[0-9A-Fa-f]{2}){5}$")
+
+
+def run_command(args: list[str], *, timeout: int = 20, input_text: str | None = None) -> dict[str, Any]:
+	try:
+		completed = subprocess.run(
+			args,
+			input=input_text,
+			text=True,
+			capture_output=True,
+			timeout=timeout,
+			check=False,
+		)
+	except (OSError, subprocess.TimeoutExpired) as exc:
+		return {"ok": False, "error": str(exc)}
+	output = (completed.stdout + completed.stderr).strip()
+	return {
+		"ok": completed.returncode == 0,
+		"code": completed.returncode,
+		"output": output[-12000:],
+	}
+
+
+def text_arg(request: dict[str, Any], name: str, limit: int = 256) -> str:
+	value = request.get(name)
+	if not isinstance(value, str) or not value or len(value) > limit:
+		raise ValueError(f"invalid {name}")
+	return value
+
+
+def decode_arg(request: dict[str, Any], name: str, limit: int = 256) -> str:
+	value = text_arg(request, name, limit * 2)
+	try:
+		decoded = base64.b64decode(value, validate=True).decode("utf-8")
+	except (ValueError, UnicodeDecodeError) as exc:
+		raise ValueError(f"invalid encoded {name}") from exc
+	if not decoded or len(decoded) > limit:
+		raise ValueError(f"invalid {name}")
+	return decoded
+
+
+def wifi_interface() -> str:
+	result = run_command(["nmcli", "-t", "-f", "DEVICE,TYPE", "device", "status"])
+	if not result["ok"]:
+		raise RuntimeError(result.get("output", "nmcli failed"))
+	for line in result.get("output", "").splitlines():
+		parts = line.split(":", 1)
+		if len(parts) == 2 and parts[1] == "wifi":
+			return parts[0]
+	raise RuntimeError("no Wi-Fi interface found")
+
+
+def parse_nmcli_lines(output: str, fields: int) -> list[list[str]]:
+	rows = []
+	for line in output.splitlines():
+		if not line.strip():
+			continue
+		parts = line.split(":", fields - 1)
+		rows.append([part.replace("\\:", ":").replace("\\\\", "\\") for part in parts])
+	return rows
+
+
+def parse_bluetooth_devices(output: str) -> list[dict[str, str]]:
+	devices = []
+	for line in output.splitlines():
+		parts = line.strip().split(None, 2)
+		if len(parts) >= 2 and parts[0] == "Device" and ADDRESS_RE.fullmatch(parts[1]):
+			devices.append({"address": parts[1], "name": parts[2] if len(parts) == 3 else parts[1]})
+	return devices
+
+
+def parse_audio_sinks(output: str) -> list[dict[str, Any]]:
+	sinks = []
+	in_sinks = False
+	for line in output.splitlines():
+		if "├─ Sinks:" in line or "└─ Sinks:" in line:
+			in_sinks = True
+			continue
+		if in_sinks and ("├─ Sources:" in line or "└─ Sources:" in line):
+			break
+		if not in_sinks:
+			continue
+		match = re.search(r"[* ]\s*(\d+)\.\s+([^\s]+)", line)
+		if match:
+			sinks.append({"id": int(match.group(1)), "name": match.group(2), "default": "*" in line})
+	return sinks
+
+
+def brightness_value(output: str) -> int:
+	match = re.search(r"(\d+)%", output)
+	return int(match.group(1)) if match else -1
+
+
+def volume_state(output: str) -> dict[str, Any]:
+	match = re.search(r"Volume:\s*([0-9.]+)", output)
+	return {
+		"ok": True,
+		"value": float(match.group(1)) if match else -1,
+		"muted": "MUTED" in output,
+		"output": output,
+	}
+
+
+def bluetooth_address(request: dict[str, Any]) -> str:
+	address = text_arg(request, "address", 32)
+	if not ADDRESS_RE.fullmatch(address):
+		raise ValueError("invalid Bluetooth address")
+	return address
+
+
+def handle(request: dict[str, Any]) -> dict[str, Any]:
+	op = request.get("op")
+	if not isinstance(op, str):
+		raise ValueError("missing operation")
+
+	if op == "ping":
+		return {"ok": True, "service": "surface-android-control", "version": 1}
+
+	if op == "volume.get":
+		result = run_command(["wpctl", "get-volume", "@DEFAULT_AUDIO_SINK@"])
+		return volume_state(result.get("output", "")) if result["ok"] else result
+	if op == "volume.set":
+		value = float(request.get("value"))
+		if not 0.0 <= value <= 1.5:
+			raise ValueError("volume must be between 0 and 1.5")
+		return run_command(["wpctl", "set-volume", "@DEFAULT_AUDIO_SINK@", f"{value:.3f}"])
+	if op == "volume.mute":
+		value = request.get("value")
+		if value not in (0, 1, "0", "1", "toggle"):
+			raise ValueError("invalid mute value")
+		return run_command(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", str(value)])
+	if op == "volume.mute.toggle":
+		return run_command(["wpctl", "set-mute", "@DEFAULT_AUDIO_SINK@", "toggle"])
+	if op == "audio.sinks":
+		result = run_command(["wpctl", "status", "-n"])
+		if result["ok"]:
+			result["sinks"] = parse_audio_sinks(result.get("output", ""))
+		return result
+	if op == "audio.default":
+		value = request.get("id")
+		if not isinstance(value, int) or not 1 <= value <= 100000:
+			raise ValueError("invalid audio sink id")
+		return run_command(["wpctl", "set-default", str(value)])
+
+	if op == "brightness.get":
+		result = run_command(["brightnessctl", "-m"])
+		if result["ok"]:
+			result["value"] = brightness_value(result.get("output", ""))
+		return result
+	if op == "brightness.set":
+		value = request.get("value")
+		if not isinstance(value, int) or not 0 <= value <= 100:
+			raise ValueError("brightness must be between 0 and 100")
+		return run_command(["brightnessctl", "set", f"{value}%"])
+	if op == "brightness.step":
+		current = handle({"op": "brightness.get"})
+		value = current.get("value", 50)
+		levels = [25, 50, 75, 100]
+		next_value = next((level for level in levels if level > value), levels[0])
+		return run_command(["brightnessctl", "set", f"{next_value}%"])
+
+	if op == "wifi.status":
+		result = run_command(["nmcli", "-t", "-f", "DEVICE,TYPE,STATE,CONNECTION", "device", "status"])
+		if result["ok"]:
+			result["devices"] = [dict(zip(["device", "type", "state", "connection"], row)) for row in parse_nmcli_lines(result.get("output", ""), 4)]
+		return result
+	if op == "wifi.radio":
+		result = run_command(["nmcli", "radio", "wifi"])
+		if result["ok"]:
+			result["enabled"] = "enabled" in result.get("output", "").lower()
+		return result
+	if op == "wifi.scan":
+		interface = wifi_interface()
+		result = run_command(["nmcli", "-t", "-f", "SSID,SECURITY,SIGNAL", "device", "wifi", "list", "ifname", interface, "--rescan", "yes"], timeout=15)
+		if result["ok"]:
+			result["networks"] = [dict(zip(["ssid", "security", "signal"], row)) for row in parse_nmcli_lines(result.get("output", ""), 3)]
+		return result
+	if op == "wifi.list":
+		interface = wifi_interface()
+		result = run_command(["nmcli", "-t", "-f", "SSID,SECURITY,SIGNAL", "device", "wifi", "list", "ifname", interface, "--rescan", "no"], timeout=8)
+		if result["ok"]:
+			result["networks"] = [dict(zip(["ssid", "security", "signal"], row)) for row in parse_nmcli_lines(result.get("output", ""), 3)]
+		return result
+	if op == "wifi.connect":
+		interface = wifi_interface()
+		ssid = decode_arg(request, "ssid", 128)
+		password = decode_arg(request, "password", 128)
+		return run_command(["nmcli", "device", "wifi", "connect", ssid, "password", password, "ifname", interface], timeout=30)
+	if op == "wifi.disconnect":
+		return run_command(["nmcli", "device", "disconnect", wifi_interface()], timeout=20)
+	if op == "wifi.toggle":
+		state = run_command(["nmcli", "radio", "wifi"])
+		enable = "disabled" in state.get("output", "").lower()
+		return run_command(["nmcli", "radio", "wifi", "on" if enable else "off"])
+
+	if op == "bluetooth.status":
+		result = run_command(["bluetoothctl", "show"])
+		if result["ok"]:
+			result["powered"] = bool(re.search(r"Powered:\s+yes", result.get("output", ""), re.I))
+		return result
+	if op == "bluetooth.devices":
+		result = run_command(["bluetoothctl", "devices"])
+		if result["ok"]:
+			result["devices"] = parse_bluetooth_devices(result.get("output", ""))
+		return result
+	if op == "bluetooth.scan":
+		result = run_command(["bluetoothctl", "--timeout", "5", "scan", "on"], timeout=10)
+		devices = run_command(["bluetoothctl", "devices"])
+		return {"ok": devices["ok"], "scan": result, "devices": parse_bluetooth_devices(devices.get("output", ""))}
+	if op == "bluetooth.power":
+		value = request.get("value")
+		if value not in ("on", "off"):
+			raise ValueError("Bluetooth power must be on or off")
+		return run_command(["bluetoothctl", "power", str(value)])
+	if op == "bluetooth.pair":
+		address = bluetooth_address(request)
+		commands = f"power on\nagent on\ndefault-agent\npair {address}\nquit\n"
+		return run_command(["bluetoothctl"], timeout=35, input_text=commands)
+	if op == "bluetooth.connect":
+		return run_command(["bluetoothctl", "connect", bluetooth_address(request)], timeout=30)
+	if op == "bluetooth.disconnect":
+		return run_command(["bluetoothctl", "disconnect", bluetooth_address(request)], timeout=20)
+
+	raise ValueError("operation is not allowed")
+
+
+def response_for(line: bytes) -> bytes:
+	try:
+		if len(line) > MAX_REQUEST:
+			raise ValueError("request too large")
+		request = json.loads(line.decode("utf-8"))
+		if not isinstance(request, dict):
+			raise ValueError("request must be an object")
+		response = handle(request)
+	except (ValueError, TypeError, json.JSONDecodeError, RuntimeError) as exc:
+		response = {"ok": False, "error": str(exc)}
+	return (json.dumps(response, ensure_ascii=False, separators=(",", ":")) + "\n").encode("utf-8")
+
+
+def listen_socket() -> socket.socket:
+	if os.environ.get("LISTEN_FDS") == "1" and os.environ.get("LISTEN_PID") == str(os.getpid()):
+		return socket.fromfd(3, socket.AF_UNIX, socket.SOCK_STREAM)
+	path = "/run/surface-android-control/control.sock"
+	os.makedirs(os.path.dirname(path), mode=0o755, exist_ok=True)
+	try:
+		os.unlink(path)
+	except FileNotFoundError:
+		pass
+	sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+	sock.bind(path)
+	os.chmod(path, 0o666)
+	sock.listen(8)
+	return sock
+
+
+def main() -> int:
+	sock = listen_socket()
+	with sock:
+		while True:
+			connection, _ = sock.accept()
+			with connection:
+				connection.settimeout(35)
+				data = b""
+				while len(data) <= MAX_REQUEST:
+					chunk = connection.recv(4096)
+					if not chunk:
+						break
+					data += chunk
+					if b"\n" in data:
+						break
+				line = data.split(b"\n", 1)[0]
+				connection.sendall(response_for(line))
+	return 0
+
+
+if __name__ == "__main__":
+	sys.exit(main())

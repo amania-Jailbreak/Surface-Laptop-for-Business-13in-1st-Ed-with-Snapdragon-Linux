@@ -1,0 +1,39 @@
+#!/bin/sh
+set -eu
+
+export HOME=/home/amania
+export USER=amania
+export LOGNAME=amania
+export XDG_RUNTIME_DIR=/run/user/1000
+export XDG_SESSION_TYPE=wayland
+export XDG_CURRENT_DESKTOP=Cage
+
+if [ ! -d "$XDG_RUNTIME_DIR" ]; then
+	printf '%s\n' 'Android Mode: XDG runtime directory is unavailable' >&2
+	exec /bin/bash --noprofile --norc
+fi
+
+if ! command -v cage >/dev/null 2>&1; then
+	printf '%s\n' 'Android Mode: cage is not installed; install it and reboot into Android Mode again.' >&2
+	exec /bin/bash --noprofile --norc
+fi
+
+if ! command -v waydroid >/dev/null 2>&1; then
+	printf '%s\n' 'Android Mode: waydroid is not installed' >&2
+	exec /bin/bash --noprofile --norc
+fi
+
+# Keep the control app in the existing Waydroid data set. Reinstalling an
+# already-installed copy is harmless and lets a newly built APK take effect.
+if [ -f /usr/share/surface-laptop-13/SurfaceControls.apk ]; then
+	waydroid app install /usr/share/surface-laptop-13/SurfaceControls.apk \
+		>/tmp/surface-controls-install.log 2>&1 || true
+fi
+
+printf '%s\n' 'Starting Waydroid in Android Mode. Press Ctrl+Alt+F2 for a recovery TTY.'
+set +e
+cage -- /usr/bin/waydroid show-full-ui
+status=$?
+set -e
+printf 'Android Mode stopped (status %s). This TTY remains available for recovery.\n' "$status" >&2
+exec /bin/bash --noprofile --norc

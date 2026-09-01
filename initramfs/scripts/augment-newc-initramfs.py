@@ -60,6 +60,23 @@ def parse_entries(cpio: bytes) -> tuple[list[tuple[str, bytes]], bytes]:
     raise ValueError("newc trailer not found")
 
 
+def entry_payload(raw: bytes) -> bytes:
+    """Return the payload from one complete newc entry."""
+    if raw[:6] not in (b"070701", b"070702"):
+        raise ValueError("invalid newc entry")
+    namesize = int(raw[94:102], 16)
+    filesize = int(raw[54:62], 16)
+    data_start = align4(110 + namesize)
+    return raw[data_start : data_start + filesize]
+
+
+def entry_mode(raw: bytes) -> int:
+    """Return the mode field from one complete newc entry."""
+    if raw[:6] not in (b"070701", b"070702"):
+        raise ValueError("invalid newc entry")
+    return int(raw[14:22], 16)
+
+
 def read_manifest(path: str) -> dict[str, tuple[bytes, int]]:
     replacements: dict[str, tuple[bytes, int]] = {}
     with open(path, encoding="utf-8") as manifest:
@@ -79,12 +96,65 @@ def read_manifest(path: str) -> dict[str, tuple[bytes, int]]:
 
 
 def main() -> None:
-    if len(sys.argv) != 4:
-        raise SystemExit(f"usage: {sys.argv[0]} INPUT OUTPUT MANIFEST")
-    source, target, manifest = sys.argv[1:]
+    if len(sys.argv) < 4:
+        raise SystemExit(
+            f"usage: {sys.argv[0]} INPUT OUTPUT MANIFEST [DROP_PREFIX ...]"
+        )
+    source, target, manifest, *drop_prefixes = sys.argv[1:]
+    normalized_prefixes = []
+    for prefix in drop_prefixes:
+        prefix = prefix.strip("/")
+        if not prefix or ".." in prefix.split("/"):
+            raise ValueError(f"unsafe drop prefix: {prefix!r}")
+        normalized_prefixes.append(prefix)
     entries, trailer = parse_entries(gzip.decompress(open(source, "rb").read()))
     replacements = read_manifest(manifest)
-    kept = [(name, raw) for name, raw in entries if name not in replacements]
+
+    # initramfs-tools executes only the commands listed by ORDER.  Merely
+    # adding a script below scripts/init-premount leaves it inert, which is
+    # especially serious for a USB-root system: the matching PHY and storage
+    # modules must be loaded before root discovery.  Preserve the base ORDER
+    # and append every new premount script from the manifest exactly once.
+    premount_prefix = "scripts/init-premount/"
+    premount_scripts = [
+        name[len(premount_prefix) :]
+        for name in replacements
+        if name.startswith(premount_prefix)
+        and name != premount_prefix + "ORDER"
+        and not name.endswith("/")
+    ]
+    if premount_scripts:
+        order_name = premount_prefix + "ORDER"
+        if order_name in replacements:
+            order_payload, order_mode = replacements[order_name]
+        else:
+            order_entry = next((raw for name, raw in entries if name == order_name), None)
+            if order_entry is None:
+                order_payload, order_mode = b"", stat.S_IFREG | 0o755
+            else:
+                order_payload, order_mode = entry_payload(order_entry), entry_mode(order_entry)
+        order_text = order_payload.decode("utf-8", "surrogateescape")
+        if order_text and not order_text.endswith("\n"):
+            order_text += "\n"
+        existing_lines = set(order_text.splitlines())
+        for script in premount_scripts:
+            command = f'/scripts/init-premount/{script} "$@"'
+            if command not in existing_lines:
+                order_text += command + "\n"
+                existing_lines.add(command)
+        replacements[order_name] = (order_text.encode("utf-8", "surrogateescape"), order_mode)
+
+    def dropped(name: str) -> bool:
+        return any(
+            name == prefix or name.startswith(prefix + "/")
+            for prefix in normalized_prefixes
+        )
+
+    kept = [
+        (name, raw)
+        for name, raw in entries
+        if name not in replacements and not dropped(name)
+    ]
     ino = len(kept) + 1
     additions = [
         (name, newc_entry(name.encode("utf-8", "surrogateescape"), payload, mode, ino + i))

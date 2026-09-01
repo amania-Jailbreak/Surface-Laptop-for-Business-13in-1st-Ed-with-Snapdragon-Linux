@@ -1,12 +1,26 @@
 # Build outputs and local recovery sets are never committed.
 SURFACE-CURRENT/
+out/
+artifacts/
 *.efi
 *.dtb
 *.img
+*.dtbo
+*.apk
+*.log
 device-tree/base/*.dtb
 drivers/firmware/
 kernel/source/
-.work/
 
-# Local private inputs (paths vary per machine)
+# Generated language/tool caches.
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.gradle/
+.github/*/build/
+
+# Local source checkouts and OS-specific inputs.
+kernel/source/
 initramfs/base/
+.env
+.env.*

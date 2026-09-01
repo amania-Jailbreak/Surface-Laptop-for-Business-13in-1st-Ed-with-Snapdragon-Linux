@@ -1,0 +1,37 @@
+name: Validate hardware sources
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  source-validation:
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install validation tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            device-tree-compiler python3 ripgrep
+
+      - name: Check shell and Python syntax
+        run: |
+          bash -n build.sh packaging/*.sh recovery/*.sh \
+            android-mode/install-android-mode.sh \
+            android-mode/app/build-android-apk.sh \
+            initramfs/scripts/*.sh
+          python3 -m py_compile initramfs/scripts/*.py
+
+      - name: Build and inspect device trees
+        run: |
+          SURFACE_WORK_DIR="$RUNNER_TEMP/surface-dtb" \
+            REBUILD_BASE_DTB=1 ./build.sh dtb
+
+      - name: Verify repository boundary
+        run: ./build.sh verify

@@ -1,0 +1,28 @@
+[Unit]
+Description=Surface Android host-control service
+ConditionKernelCommandLine=surface.mode=android
+Requires=surface-android-control.socket
+After=NetworkManager.service bluetooth.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/surface-android-control
+User=root
+Group=root
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+Environment=PIPEWIRE_REMOTE=pipewire-0
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectHome=yes
+ProtectSystem=strict
+RestrictAddressFamilies=AF_UNIX AF_NETLINK
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+StandardOutput=journal
+StandardError=journal
+Restart=on-failure
+RestartSec=2s
+
+[Install]
+WantedBy=multi-user.target

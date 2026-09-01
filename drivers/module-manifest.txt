@@ -1,15 +1,46 @@
 # Relative to /usr/lib/modules/<kernel-release>
+# The initramfs builder also preserves the boot archive's matching module
+# paths and resolves their dependencies. The entries below are the explicit
+# Surface/Waydroid/desktop seeds that must remain available during boot.
 kernel/crypto/ecc.ko
 kernel/crypto/kpp.ko
 kernel/crypto/ecdh_generic.ko
+kernel/drivers/dma/qcom/gpi.ko
+kernel/drivers/gpu/drm/bridge/aux-bridge.ko
+kernel/drivers/hid/i2c-hid/i2c-hid-of.ko
+kernel/drivers/i2c/busses/i2c-qcom-geni.ko
+kernel/drivers/nvme/host/nvme-core.ko
+kernel/drivers/nvme/host/nvme.ko
+kernel/drivers/phy/qualcomm/phy-qcom-qmp-combo.ko
+kernel/drivers/phy/qualcomm/phy-qcom-qmp-usbc.ko
+kernel/drivers/phy/qualcomm/phy-qcom-qusb2.ko
+kernel/drivers/phy/qualcomm/phy-qcom-usb-hs.ko
+kernel/drivers/phy/qualcomm/phy-qcom-usb-ss.ko
+kernel/net/llc/llc.ko
+kernel/net/802/stp.ko
+kernel/net/bridge/bridge.ko
+kernel/net/bridge/br_netfilter.ko
+kernel/drivers/net/veth.ko
+kernel/net/netfilter/x_tables.ko
+kernel/net/ipv4/netfilter/ip_tables.ko
+kernel/net/ipv4/netfilter/iptable_filter.ko
+kernel/net/ipv4/netfilter/iptable_nat.ko
+kernel/net/ipv4/netfilter/iptable_mangle.ko
+kernel/net/ipv4/netfilter/nf_defrag_ipv4.ko
+kernel/net/ipv6/netfilter/nf_defrag_ipv6.ko
+kernel/net/netfilter/nf_conntrack.ko
+kernel/net/netfilter/nf_nat.ko
+kernel/net/netfilter/xt_tcpudp.ko
+kernel/net/netfilter/xt_MASQUERADE.ko
+kernel/net/netfilter/xt_CHECKSUM.ko
 kernel/net/bluetooth/bluetooth.ko
 kernel/drivers/bluetooth/btbcm.ko
 kernel/drivers/bluetooth/btqca.ko
 kernel/drivers/bluetooth/hci_uart.ko
 
-# Optional desktop modules.  These are normally installed in the target
-# system's module tree; add them to the initramfs only when the root or an
-# early network mount needs them before switch_root.
+# Desktop modules kept available for the target OS. CIFS and WireGuard are
+# explicitly seeded into the Surface initramfs; the remaining filesystems are
+# normally installed in the target system's matching module tree.
 kernel/fs/smb/client/cifs.ko
 kernel/fs/nls/nls_utf8.ko
 kernel/drivers/net/wireguard/wireguard.ko

@@ -1,0 +1,32 @@
+[Unit]
+Description=Surface Android Mode session
+ConditionKernelCommandLine=surface.mode=android
+Requires=waydroid-container.service surface-android-control.socket
+After=systemd-user-sessions.service waydroid-container.service surface-android-control.socket
+Conflicts=greetd.service getty@tty1.service
+Before=greetd.service getty@tty1.service
+
+[Service]
+Type=simple
+User=amania
+Group=amania
+SupplementaryGroups=audio video render input
+PAMName=login
+TTYPath=/dev/tty1
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Environment=HOME=/home/amania
+Environment=USER=amania
+Environment=LOGNAME=amania
+Environment=XDG_RUNTIME_DIR=/run/user/1000
+ExecStart=/usr/bin/surface-android-session
+ExecStopPost=/usr/bin/waydroid session stop
+TimeoutStartSec=120
+Restart=no
+
+[Install]
+WantedBy=multi-user.target

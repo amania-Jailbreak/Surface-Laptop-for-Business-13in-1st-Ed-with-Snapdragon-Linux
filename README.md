@@ -8,6 +8,10 @@ initramfs hooks, and the inputs needed to assemble a bootable UKI.
 There is no root filesystem, desktop, or disk image in this repository. Your
 distribution provides those; this repo provides the hardware-specific parts.
 
+For a quick orientation, see `AGENTS.md` and
+`docs/repository-layout.md`. They describe which files are source, which are
+local inputs, and where generated boot components go.
+
 
 ## What works
 
@@ -35,12 +39,24 @@ You need a kernel checkout and an AArch64 cross compiler. Then:
 ./build.sh kernel
 ./build.sh initramfs
 ./build.sh uki
+./build.sh android
 ./build.sh package
+./build.sh release
 ./build.sh verify
 ```
 
 `Containerfile` builds the same thing in Docker/Podman if you prefer a
 container. The kernel build is the slow part; everything else takes seconds.
+
+For distribution, `packaging/` provides a release package builder and a safe
+systemd-boot installer. A release contains only boot components; it never
+contains a complete OS image. See `packaging/README.md` and
+`docs/support-matrix.md`.
+
+Android Mode is an optional, separate UKI. `./build.sh android` stages the UKI,
+systemd units, Cage session, host-control service, and the `Surface Controls`
+APK without changing the normal boot files. See `docs/android-mode.md` for
+installation and the required Android SDK command-line tools.
 
 
 ## Boot files
@@ -93,6 +109,8 @@ Fingerprint userspace setup (libfprint patch, fprintd) is documented in
 
 ## Docs
 
+- `docs/repository-layout.md` - source map and change boundaries
+- `docs/support-matrix.md` - tested and experimental hardware status
 - `docs/build.md` - build system details
 - `docs/boot.md` - UKI layout, systemd-boot entries
 - `docs/device-tree.md` - what each overlay changes and why

@@ -13,12 +13,21 @@ The public build has four independent inputs:
 creates a partition table, mounts an ESP, writes a block device, builds a root
 filesystem, or starts a package manager.
 
+`build.sh release` performs the same build, then creates a versioned ARM64
+Debian package under `SURFACE_RELEASE_DIR` (or the work directory's
+`release-assets/`). The package is a release transport format only; the
+separate `packaging/install-uki.sh` command is required to add a boot entry.
+
 The command line contains `root=UUID=CHANGE-ME` as a safe placeholder. A
 distribution integration must replace it with the UUID or label of its own
 root filesystem before deployment.
 
-Set `KERNEL_SOURCE`, `KERNEL_CONFIG`, `KERNEL_CONFIG_FRAGMENT`, `BASE_DTS`, `INITRD_BASE`,
-`FIRMWARE_SOURCE`, and `UKI_STUB` to port the builder to another host.
+Set `KERNEL_SOURCE`, `KERNEL_CONFIG`, `KERNEL_CONFIG_FRAGMENT`, `BASE_DTS`,
+`INITRD_BASE`, `FIRMWARE_SOURCE`, and `UKI_STUB` to port the builder to another
+host. The base DTB is compiled from `BASE_DTS` by default, so a clean clone
+does not require an ignored binary. Set `BASE_DTB_INPUT` together with
+`REBUILD_BASE_DTB=0` only when comparing against a separately obtained,
+measured DTB.
 
 `KERNEL_SOURCE`, `INITRD_BASE` and `FIRMWARE_SOURCE` have no default: the
 full kernel/UKI build fails fast when they are not exported. The DTB-only
