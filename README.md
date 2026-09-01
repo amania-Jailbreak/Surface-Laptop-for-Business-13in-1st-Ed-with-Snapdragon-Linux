@@ -128,6 +128,19 @@ The available targets are:
 source, initramfs, firmware, and target command line remain external inputs;
 the container does not download or package a full operating system.
 
+### GitHub Actions
+
+The `Build ARM64 kernel` workflow builds the pinned Linux source from
+`kernel/source.lock` with the public configuration, then compiles and checks
+the device trees. It uploads the resulting `Image`, modules, kernel config,
+release string, and DTBs as a short-lived workflow artifact.
+
+The workflow does not build a UKI or include firmware, an initramfs, a root
+filesystem, or an operating-system image. Those inputs belong to the target
+distribution and are intentionally kept outside the public build. Run it from
+the repository's **Actions** tab with **Build ARM64 kernel**, or let it run
+automatically when kernel, device-tree, build-script, or workflow files change.
+
 
 ## Boot files
 

@@ -1,0 +1,121 @@
+name: Build ARM64 kernel
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/build-kernel.yml'
+      - 'build.sh'
+      - 'device-tree/**'
+      - 'kernel/**'
+  pull_request:
+    paths:
+      - '.github/workflows/build-kernel.yml'
+      - 'build.sh'
+      - 'device-tree/**'
+      - 'kernel/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: kernel-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build kernel and device trees
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out hardware sources
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            bc \
+            bison \
+            build-essential \
+            cpio \
+            device-tree-compiler \
+            flex \
+            gcc-aarch64-linux-gnu \
+            kmod \
+            libelf-dev \
+            libssl-dev \
+            python3 \
+            ripgrep \
+            rsync
+
+      - name: Read pinned kernel source
+        id: source
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          source_url=$(sed -n 's/^source = //p' kernel/source.lock)
+          revision=$(sed -n 's/^revision = //p' kernel/source.lock)
+          architecture=$(sed -n 's/^architecture = //p' kernel/source.lock)
+          test -n "$source_url"
+          test -n "$revision"
+          test "$architecture" = arm64
+          {
+            echo "url=$source_url"
+            echo "revision=$revision"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Fetch pinned kernel source
+        env:
+          KERNEL_URL: ${{ steps.source.outputs.url }}
+          KERNEL_REVISION: ${{ steps.source.outputs.revision }}
+        run: |
+          set -Eeuo pipefail
+          kernel_source="$RUNNER_TEMP/linux"
+          mkdir -p "$kernel_source"
+          git -C "$kernel_source" init
+          git -C "$kernel_source" remote add origin "$KERNEL_URL"
+          git -C "$kernel_source" fetch --depth=1 --no-tags origin "$KERNEL_REVISION"
+          git -C "$kernel_source" checkout --detach FETCH_HEAD
+          git -C "$kernel_source" describe --always --dirty
+
+      - name: Build kernel and modules
+        env:
+          KERNEL_SOURCE: ${{ runner.temp }}/linux
+          KERNEL_JOBS: 2
+          SURFACE_WORK_DIR: ${{ runner.temp }}/surface-build
+        run: ./build.sh kernel
+
+      - name: Build and inspect device trees
+        env:
+          SURFACE_WORK_DIR: ${{ runner.temp }}/surface-build
+          REBUILD_BASE_DTB: 1
+        run: ./build.sh dtb
+
+      - name: Verify public source and build outputs
+        env:
+          SURFACE_WORK_DIR: ${{ runner.temp }}/surface-build
+        run: |
+          set -Eeuo pipefail
+          ./build.sh verify
+          test -s "$SURFACE_WORK_DIR/kernel/Image"
+          test -s "$SURFACE_WORK_DIR/kernel/config"
+          test -s "$SURFACE_WORK_DIR/kernel/release"
+          test -s "$SURFACE_WORK_DIR/dtb/surface-laptop-13-current.dtb"
+          test -s "$SURFACE_WORK_DIR/dtb/surface-laptop-13-bluetooth.dtb"
+          test -s "$SURFACE_WORK_DIR/dtb/surface-laptop-13-fingerprint.dtb"
+          test -s "$SURFACE_WORK_DIR/dtb/surface-laptop-13-bluetooth-fingerprint.dtb"
+
+      - name: Upload kernel and DTB artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: surface-laptop-13-kernel-${{ github.sha }}
+          if-no-files-found: error
+          retention-days: 14
+          path: |
+            ${{ runner.temp }}/surface-build/kernel/Image
+            ${{ runner.temp }}/surface-build/kernel/config
+            ${{ runner.temp }}/surface-build/kernel/release
+            ${{ runner.temp }}/surface-build/modules
+            ${{ runner.temp }}/surface-build/dtb
