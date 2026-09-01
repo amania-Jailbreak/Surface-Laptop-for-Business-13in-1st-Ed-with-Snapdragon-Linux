@@ -4,6 +4,7 @@ build/
 *.efi
 *.dtb
 *.img
+*.iso
 device-tree/base/*.dtb
 drivers/firmware/
 kernel/source/
@@ -11,3 +12,4 @@ kernel/source/
 
 # Local private inputs (paths vary per machine)
 initramfs/base/
+attachments/Image
