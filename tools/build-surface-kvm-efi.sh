@@ -299,10 +299,6 @@ pause
 exit
 
 :surface_kvm_launch
-if exist \EFI\BOOT\qebspilaa64.efi then
-  echo surface-kvm: loading qebspil from EFI Shell
-  load \EFI\BOOT\qebspilaa64.efi
-endif
 echo surface-kvm: loading slbounce from EFI Shell
 load \EFI\BOOT\slbounceaa64.efi
 echo surface-kvm: starting normal Proxmox shim/GRUB
