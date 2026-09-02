@@ -245,14 +245,14 @@ menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-k
 }
 EOF
 
-	if [[ -f "$STAGE_DIR/EFI/BOOT/surface-kvm-shell.efi" ]]; then
+	if [[ -f "$STAGE_DIR/EFI/BOOT/surface-kvm-shell-bridge.efi" ]]; then
 		cat >>"$grub_cfg" <<EOF
 
 menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-kvm-shell --class debian --class gnu-linux --class gnu --class os {
     echo    'Entering Surface EL2/KVM via EFI Shell ...'
     insmod  chain
     search  --no-floppy --file --set=iso_root /boot/linux26
-    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-shell.efi
+	    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-shell-bridge.efi
     boot
 }
 
@@ -395,6 +395,11 @@ install_kvm_iso_bridge() {
 		7z x -y -o"$payload_dir" "$efi_image" 'EFI/BOOT/surface-kvm-shell.efi' >/dev/null
 		cp --preserve=mode,timestamps "$payload_dir/EFI/BOOT/surface-kvm-shell.efi" \
 			"$bridge_dir/surface-kvm-shell.efi"
+	fi
+	if grep -Fq 'Path = EFI/BOOT/surface-kvm-shell-bridge.efi' "$payload_listing"; then
+		7z x -y -o"$payload_dir" "$efi_image" 'EFI/BOOT/surface-kvm-shell-bridge.efi' >/dev/null
+		cp --preserve=mode,timestamps "$payload_dir/EFI/BOOT/surface-kvm-shell-bridge.efi" \
+			"$bridge_dir/surface-kvm-shell-bridge.efi"
 	fi
 	if grep -Fq 'Path = startup.nsh' "$payload_listing"; then
 		7z x -y -o"$payload_dir" "$efi_image" 'startup.nsh' >/dev/null

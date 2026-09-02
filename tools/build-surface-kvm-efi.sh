@@ -213,6 +213,10 @@ build_el2_loader() {
 	build_loader_variant el2 "$WORK_DIR/surface-kvm-entry.efi" -DSURFACE_KVM_INSTALL_DTB
 }
 
+build_shell_bridge() {
+	build_loader_variant shell "$WORK_DIR/surface-kvm-shell-bridge.efi" -DSURFACE_KVM_START_SHELL
+}
+
 find_base_file() {
 	local name=$1
 	find "$EXTRACT_DIR" -type f -iname "$name" -print -quit
@@ -321,6 +325,11 @@ main() {
 		el2_loader_efi=$(build_el2_loader | tail -n 1)
 		[[ -f "$el2_loader_efi" ]] || die "EL2 EFI launcher was not built: $el2_loader_efi"
 	fi
+	local shell_bridge_efi=
+	if [[ -n "$SHELL_EFI" ]]; then
+		shell_bridge_efi=$(build_shell_bridge | tail -n 1)
+		[[ -f "$shell_bridge_efi" ]] || die "EFI Shell bridge was not built: $shell_bridge_efi"
+	fi
 
 	mkdir -p "$WORK_DIR" "$(dirname -- "$OUTPUT")"
 	EXTRACT_DIR=$(mktemp -d "$WORK_DIR/base-efi.XXXXXX")
@@ -370,6 +379,9 @@ main() {
 	fi
 	copy_firmware_tree
 	install_shell_path
+	if [[ -n "$shell_bridge_efi" ]]; then
+		copy_efi_file "$shell_bridge_efi" /EFI/BOOT/surface-kvm-shell-bridge.efi
+	fi
 
 	printf '\nSurface KVM EFI image: %s\n' "$OUTPUT"
 	file "$OUTPUT"

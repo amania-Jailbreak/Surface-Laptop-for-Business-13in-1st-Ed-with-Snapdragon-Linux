@@ -285,7 +285,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 		Print(L"surface-kvm: cannot locate the boot volume: %r\n", status);
 		return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
 	}
-#ifdef SURFACE_KVM_INSTALL_DTB
+#ifdef SURFACE_KVM_START_SHELL
+	payload_marker = L"\\EFI\\BOOT\\surface-kvm-shell.efi";
+#elif defined(SURFACE_KVM_INSTALL_DTB)
 	payload_marker = L"\\surface-laptop-13-el2.dtb";
 #endif
 	status = find_payload_device(loaded_image->DeviceHandle, payload_marker,
@@ -294,6 +296,26 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 		Print(L"surface-kvm: payload volume not found: %r\n", status);
 		return status;
 	}
+
+#ifdef SURFACE_KVM_START_SHELL
+	/*
+	 * A GRUB chainloader may start this bridge from ISO9660.  Start the real
+	 * Shell from the FAT volume that contains it, so the Shell receives a
+	 * usable EFI_SIMPLE_FILE_SYSTEM_PROTOCOL device handle and can execute
+	 * that volume's startup.nsh.
+	 */
+	write_state(device, (CHAR8 *)"shell-bridge-start\n");
+	Print(L"surface-kvm: starting EFI Shell from FAT payload volume...\n");
+	status = start_image_from_volume(image, device,
+					 L"\\EFI\\BOOT\\surface-kvm-shell.efi");
+	if (EFI_ERROR(status)) {
+		write_state(device, (CHAR8 *)"shell-bridge-fail\n");
+		Print(L"surface-kvm: EFI Shell bridge failed: %r\n", status);
+		return status;
+	}
+	write_state(device, (CHAR8 *)"shell-bridge-ok\n");
+	return status;
+#endif
 
 	write_state(device, (CHAR8 *)"launcher-start\n");
 
