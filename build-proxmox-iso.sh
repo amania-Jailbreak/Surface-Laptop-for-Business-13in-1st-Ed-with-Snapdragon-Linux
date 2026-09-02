@@ -207,6 +207,11 @@ lines = text.splitlines(keepends=True)
 result = []
 patched = 0
 for line in lines:
+    # Make repeated rebuilds deterministic.  Older patched inputs may already
+    # contain one or more Surface DTB directives; replace them with exactly one
+    # directive after each Proxmox kernel line below.
+    if re.match(r"^\s*devicetree\s+/boot/", line):
+        continue
     result.append(line)
     if re.match(r"^\s*linux\s+/boot/linux26(?:\s|$)", line):
         newline = "\n" if line.endswith("\n") else ""
