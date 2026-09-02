@@ -95,8 +95,7 @@ GRUB_MODULE_DIR=/usr/lib/grub/arm64-efi \
   --kernel-image build/.work/kernel/Image \
   --dtb build/.work/dtb/surface-laptop-13-current.dtb \
   --el2-dtb build/.work/dtb/surface-laptop-13-el2.dtb \
-  --efi-image build/surface-kvm-efi.img \
-  --no-initrd-modules
+  --efi-image build/surface-kvm-efi.img
 ```
 
 `--qebspil`/`--qebspil-source` can add the optional Qualcomm DSP pre-boot
