@@ -1,0 +1,16 @@
+#!/bin/sh
+
+# One-shot KVM trial entry for the installed Surface system.
+# It deliberately does not write a second next_entry value.  If the KVM
+# handoff resets the machine, GRUB's normal default (FUSE/PVE ready) is used
+# on the next boot.
+cat <<'GRUB_ENTRY'
+menuentry 'Proxmox VE - Surface Laptop 13 (KVM trial; fallback to ready)' --id surface-el2-kvm-trial --class debian --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod fat
+    insmod chain
+    search --no-floppy --fs-uuid --set=esp 584B-B4D4
+    chainloader ($esp)/EFI/BOOT/surface-kvm-entry.efi
+    boot
+}
+GRUB_ENTRY
