@@ -356,10 +356,17 @@ main() {
 	copy_efi_file "$cfg" /EFI/BOOT/grub.cfg
 	copy_efi_file "$shim" /EFI/BOOT/shimaa64.efi
 	if [[ -n "$EL2_DTB" ]]; then
-		# The normal firmware path must not install slbounce before the
-		# KVM chainloader does so.  Installing the hook twice would make
-		# ExitBootServices recurse into itself.
-		copy_efi_file "$shim" /EFI/BOOT/BOOTAA64.EFI
+		# When a Shell payload is present, make the firmware's normal FAT boot
+		# path enter the bridge first.  Starting the Shell from an ISO9660 file
+		# gives it only BLK handles on some firmware, so the GRUB menu entry is
+		# not a valid first stage for this workaround.
+		if [[ -n "$shell_bridge_efi" ]]; then
+			copy_efi_file "$shell_bridge_efi" /EFI/BOOT/BOOTAA64.EFI
+		else
+			# Without the Shell workaround, keep the normal shim as the default
+			# firmware path and use the explicit KVM launcher entry instead.
+			copy_efi_file "$shim" /EFI/BOOT/BOOTAA64.EFI
+		fi
 	else
 		copy_efi_file "$loader_efi" /EFI/BOOT/BOOTAA64.EFI
 	fi
