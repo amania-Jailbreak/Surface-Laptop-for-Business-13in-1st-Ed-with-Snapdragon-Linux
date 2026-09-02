@@ -246,14 +246,30 @@ menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-k
 EOF
 
 	if [[ -f "$STAGE_DIR/EFI/BOOT/surface-kvm-shell.efi" ]]; then
-		cat >>"$grub_cfg" <<'EOF'
+		cat >>"$grub_cfg" <<EOF
 
 menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-kvm-shell --class debian --class gnu-linux --class gnu --class os {
     echo    'Entering Surface EL2/KVM via EFI Shell ...'
     insmod  chain
     search  --no-floppy --file --set=iso_root /boot/linux26
-    chainloader ($iso_root)/EFI/BOOT/surface-kvm-shell.efi
+    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-shell.efi
     boot
+}
+
+menuentry 'Install Proxmox VE (Graphical, EL2/KVM after EFI Shell)' --id surface-el2-kvm-shell-graphical --class debian --class gnu-linux --class gnu --class os {
+    echo    'Loading Proxmox VE Installer with EL2 DTB after EFI Shell ...'
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1
+    devicetree /boot/$EL2_DTB_NAME
+    initrd  /boot/initrd.img
+}
+
+menuentry 'Install Proxmox VE (Terminal UI, EL2/KVM after EFI Shell)' --id surface-el2-kvm-shell-terminal --class debian --class gnu-linux --class gnu --class os {
+    set background_color=black
+    echo    'Loading Proxmox Console Installer with EL2 DTB after EFI Shell ...'
+    gfxpayload=800x600x16,800x600
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxtui id_aa64mmfr0.ecv=1
+    devicetree /boot/$EL2_DTB_NAME
+    initrd  /boot/initrd.img
 }
 EOF
 	fi
@@ -268,7 +284,7 @@ import sys
 
 path = pathlib.Path(sys.argv[1])
 lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
-entry = re.compile(r"^\s*menuentry\b.*--id\s+['\"]?surface-el2-kvm-(?:graphical|terminal)")
+entry = re.compile(r"^\s*menuentry\b.*--id\s+['\"]?surface-el2-kvm-(?:graphical|terminal|shell(?:-graphical|-terminal|-linux)?)")
 result = []
 removed = 0
 index = 0
