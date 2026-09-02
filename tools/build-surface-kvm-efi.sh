@@ -11,6 +11,7 @@ QEBSPIL_EFI=${QEBSPIL_EFI:-}
 QEBSPIL_SOURCE=${QEBSPIL_SOURCE:-}
 FIRMWARE_TREE=${FIRMWARE_TREE:-}
 EL2_DTB=${EL2_DTB:-}
+SHELL_EFI=${SHELL_EFI:-}
 GNUEFI_DIR=${GNUEFI_DIR:-}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/kvm-efi}
 IMAGE_SIZE=${IMAGE_SIZE:-32M}
@@ -58,6 +59,7 @@ Options:
   --qebspil-source DIR Build optional qebspil from this source tree when needed.
   --firmware-tree DIR   Optional firmware tree copied below /firmware.
   --el2-dtb FILE        Copy an EL2 DTB and build a chainloadable KVM launcher.
+  --shell FILE          Add an AArch64 UEFI Shell and startup.nsh KVM path.
   --work DIR            Build scratch directory.
   --size SIZE           FAT image size accepted by truncate (default: 32M).
   -h, --help            Show this help.
@@ -95,6 +97,9 @@ parse_args() {
 				;;
 			--el2-dtb)
 				shift; (($#)) || die "--el2-dtb needs a file"; EL2_DTB=$1
+				;;
+			--shell)
+				shift; (($#)) || die "--shell needs a file"; SHELL_EFI=$1
 				;;
 			--work)
 				shift; (($#)) || die "--work needs a directory"; WORK_DIR=$1
@@ -240,6 +245,75 @@ copy_firmware_tree() {
 	done < <(find "$FIRMWARE_TREE" -type f -print0 | sort -z)
 }
 
+install_shell_path() {
+	local startup="$WORK_DIR/surface-kvm-startup.nsh"
+
+	[[ -n "$SHELL_EFI" ]] || return 0
+	cat >"$startup" <<'EOF'
+@echo -off
+map -r
+
+if exist fs0:\EFI\BOOT\slbounceaa64.efi then
+  fs0:
+  goto surface_kvm_launch
+endif
+if exist fs1:\EFI\BOOT\slbounceaa64.efi then
+  fs1:
+  goto surface_kvm_launch
+endif
+if exist fs2:\EFI\BOOT\slbounceaa64.efi then
+  fs2:
+  goto surface_kvm_launch
+endif
+if exist fs3:\EFI\BOOT\slbounceaa64.efi then
+  fs3:
+  goto surface_kvm_launch
+endif
+if exist fs4:\EFI\BOOT\slbounceaa64.efi then
+  fs4:
+  goto surface_kvm_launch
+endif
+if exist fs5:\EFI\BOOT\slbounceaa64.efi then
+  fs5:
+  goto surface_kvm_launch
+endif
+if exist fs6:\EFI\BOOT\slbounceaa64.efi then
+  fs6:
+  goto surface_kvm_launch
+endif
+if exist fs7:\EFI\BOOT\slbounceaa64.efi then
+  fs7:
+  goto surface_kvm_launch
+endif
+if exist fs8:\EFI\BOOT\slbounceaa64.efi then
+  fs8:
+  goto surface_kvm_launch
+endif
+if exist fs9:\EFI\BOOT\slbounceaa64.efi then
+  fs9:
+  goto surface_kvm_launch
+endif
+
+echo surface-kvm: EFI Shell could not find the KVM payload volume
+pause
+exit
+
+:surface_kvm_launch
+if exist \EFI\BOOT\qebspilaa64.efi then
+  echo surface-kvm: loading qebspil from EFI Shell
+  load \EFI\BOOT\qebspilaa64.efi
+endif
+echo surface-kvm: loading slbounce from EFI Shell
+load \EFI\BOOT\slbounceaa64.efi
+echo surface-kvm: starting normal Proxmox shim/GRUB
+\EFI\BOOT\shimaa64.efi
+exit
+EOF
+
+	copy_efi_file "$SHELL_EFI" /EFI/BOOT/surface-kvm-shell.efi
+	copy_efi_file "$startup" /startup.nsh
+}
+
 main() {
 	parse_args "$@"
 	need 7z
@@ -257,6 +331,10 @@ main() {
 	if [[ -n "$EL2_DTB" ]]; then
 		EL2_DTB=$(absolute_path "$EL2_DTB")
 		[[ -f "$EL2_DTB" ]] || die "EL2 DTB not found: $EL2_DTB"
+	fi
+	if [[ -n "$SHELL_EFI" ]]; then
+		SHELL_EFI=$(absolute_path "$SHELL_EFI")
+		[[ -f "$SHELL_EFI" ]] || die "UEFI Shell binary not found: $SHELL_EFI"
 	fi
 	[[ -f "$BASE_EFI" ]] || die "base EFI image not found: $BASE_EFI"
 	[[ -f "$TCBLAUNCH" ]] || die "tcblaunch.exe not found: $TCBLAUNCH"
@@ -319,11 +397,12 @@ main() {
 		copy_efi_file "$QEBSPIL_EFI" /EFI/BOOT/qebspilaa64.efi
 	fi
 	copy_firmware_tree
+	install_shell_path
 
 	printf '\nSurface KVM EFI image: %s\n' "$OUTPUT"
 	file "$OUTPUT"
 	sha256sum "$OUTPUT"
-	7z l "$OUTPUT" | grep -E 'tcblaunch|BOOTAA64|surface-kvm-entry|surface-laptop-13-el2|slbounce|qebspil|grub|shim|firmware' || true
+	7z l "$OUTPUT" | grep -E 'tcblaunch|BOOTAA64|surface-kvm-entry|surface-kvm-shell|startup.nsh|surface-laptop-13-el2|slbounce|qebspil|grub|shim|firmware' || true
 }
 
 main "$@"
