@@ -344,6 +344,20 @@ install_kvm_iso_bridge() {
 		"$bridge_dir/surface-kvm-grubaa64.efi"
 	build_standalone_kvm_grub terminal \
 		"$bridge_dir/surface-kvm-grub-terminal.efi"
+
+	# Also keep the bridge in the FAT EFI image.  Depending on the GRUB and
+	# firmware combination, an EFI application chainloaded from an ISO9660
+	# file can receive either the ISO device handle or the El Torito FAT
+	# device handle as its LoadedImage device.
+	mcopy -i "$STAGE_DIR/efi.img" -o \
+		"$bridge_dir/surface-kvm-entry-terminal.efi" \
+		::/EFI/BOOT/surface-kvm-entry-terminal.efi
+	mcopy -i "$STAGE_DIR/efi.img" -o \
+		"$bridge_dir/surface-kvm-grubaa64.efi" \
+		::/EFI/BOOT/surface-kvm-grubaa64.efi
+	mcopy -i "$STAGE_DIR/efi.img" -o \
+		"$bridge_dir/surface-kvm-grub-terminal.efi" \
+		::/EFI/BOOT/surface-kvm-grub-terminal.efi
 }
 
 augment_initrd_with_modules() {
