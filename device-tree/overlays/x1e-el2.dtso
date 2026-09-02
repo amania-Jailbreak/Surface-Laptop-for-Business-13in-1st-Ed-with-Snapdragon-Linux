@@ -25,6 +25,11 @@
 	status = "disabled";
 };
 
+/* The video block is not usable until its EL2 firmware path is implemented. */
+&{/soc@0/video-codec@aa00000} {
+	status = "disabled";
+};
+
 &{/soc@0} {
 	pcie_smmu: iommu@15400000 {
 		compatible = "arm,smmu-v3";
@@ -39,12 +44,38 @@
 	};
 };
 
+/* Give Linux the PCIe stream IDs used by every X1e PCIe controller. */
+&{/soc@0/pcie@1bd0000} {
+	iommu-map = <0 &pcie_smmu 0x30000 0x10000>;
+	msi-map = <0 0x93 0xb0000 0x10000>;
+};
+
 &{/soc@0/pci@1bf8000} {
 	iommu-map = <0 &pcie_smmu 0x60000 0x10000>;
 };
 
+&{/soc@0/pci@1c00000} {
+	iommu-map = <0 &pcie_smmu 0x50000 0x10000>;
+	msi-map = <0 0x93 0xd0000 0x10000>;
+};
+
 &{/soc@0/pci@1c08000} {
 	iommu-map = <0 &pcie_smmu 0x40000 0x10000>;
+};
+
+/* These coprocessors are owned by Linux only after the EL2 transition. */
+&{/soc@0/remoteproc@6800000} {
+	/* apps_smmu is phandle 0x33 in the measured X1P42100 DTB. */
+	iommus = <0x33 0x1000 0x80>;
+};
+
+&{/soc@0/remoteproc@32300000} {
+	iommus = <0x33 0x0c00 0x0>;
+};
+
+/* The APSS watchdog is Linux-owned in EL2; the SBSA watchdog is not. */
+&{/soc@0/watchdog@17410000} {
+	status = "okay";
 };
 
 &{/soc@0/watchdog@1c840000} {

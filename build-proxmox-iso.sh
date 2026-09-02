@@ -17,6 +17,7 @@ EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
 KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1
+GRUB_MODULE_DIR=${GRUB_MODULE_DIR:-}
 
 DEFAULT_OUTPUT_ISO=$OUTPUT_ISO
 DEFAULT_WORK_DIR=$WORK_DIR
@@ -63,7 +64,7 @@ Options:
   --dtb-name NAME     Name of the DTB inside /boot (default: current DTB name).
   --el2-dtb FILE      Add a separate EL2/KVM DTB and installer menu entries.
   --el2-dtb-name NAME Name of the EL2 DTB inside /boot (default: surface-laptop-13-el2.dtb).
-  --efi-image FILE    Replace the ISO EFI image (for example one containing slbounce).
+  --efi-image FILE    Replace the ISO EFI image (required for --el2-dtb).
   --initrd FILE       Replace the ISO initrd with this archive.
   --no-initrd-modules Keep the selected initrd without adding built modules.
   --work DIR          Scratch directory (default: ./build/.work).
@@ -75,6 +76,10 @@ The selected initrd is augmented with the built kernel modules by default. The
 ISO's GRUB entries are changed to load the Surface DTB. The output kernel is
 an unsigned development artifact; Secure Boot may need to be disabled or the
 kernel signed before booting it.
+
+When --el2-dtb is used, an ARM64 GRUB module directory containing kernel.img
+is required. Set GRUB_MODULE_DIR when it is not installed at
+/usr/lib/grub/arm64-efi (Debian package: grub-efi-arm64-bin).
 EOF
 }
 
@@ -219,28 +224,126 @@ PY
 
 append_el2_grub_entries() {
 	local grub_cfg=$1
-	local dtb_name=$2
 
 	cat >>"$grub_cfg" <<EOF
 
-menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --class debian --class gnu-linux --class gnu --class os {
-    echo    'Loading Proxmox VE Installer with Surface EL2/KVM ...'
-    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1
-    devicetree /boot/$dtb_name
-    echo    'Loading initial ramdisk ...'
-    initrd  /boot/initrd.img
+menuentry 'Install Proxmox VE (Graphical, Surface EL2/KVM)' --id surface-el2-kvm-graphical --class debian --class gnu-linux --class gnu --class os {
+	    echo    'Entering Surface EL2/KVM Secure Launch ...'
+	    insmod  chain
+	    search  --no-floppy --file --set=iso_root /boot/linux26
+    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-entry.efi
+	    boot
 }
 
-menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --class debian --class gnu-linux --class gnu --class os {
-    set background_color=black
-    echo    'Loading Proxmox VE Console Installer with Surface EL2/KVM ...'
-    gfxpayload=800x600x16,800x600
-    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1 proxtui
-    devicetree /boot/$dtb_name
-    echo    'Loading initial ramdisk ...'
-    initrd  /boot/initrd.img
+menuentry 'Install Proxmox VE (Terminal UI, Surface EL2/KVM)' --id surface-el2-kvm-terminal --class debian --class gnu-linux --class gnu --class os {
+	    set background_color=black
+	    echo    'Entering Surface EL2/KVM Secure Launch ...'
+	    insmod  chain
+	    search  --no-floppy --file --set=iso_root /boot/linux26
+    chainloader (\$iso_root)/EFI/BOOT/surface-kvm-entry-terminal.efi
+	    boot
 }
 EOF
+}
+
+remove_existing_el2_grub_entries() {
+	local grub_cfg=$1
+	python3 - "$grub_cfg" <<'PY'
+import pathlib
+import re
+import sys
+
+path = pathlib.Path(sys.argv[1])
+lines = path.read_text(encoding="utf-8").splitlines(keepends=True)
+entry = re.compile(r"^\s*menuentry\b.*--id\s+['\"]?surface-el2-kvm-(?:graphical|terminal)")
+result = []
+removed = 0
+index = 0
+while index < len(lines):
+    if not entry.match(lines[index]):
+        result.append(lines[index])
+        index += 1
+        continue
+
+    depth = 0
+    while index < len(lines):
+        depth += lines[index].count("{") - lines[index].count("}")
+        index += 1
+        if depth <= 0:
+            break
+    removed += 1
+
+path.write_text("".join(result), encoding="utf-8")
+if removed:
+    print(f"removed existing EL2/KVM entries: {removed}")
+PY
+}
+
+build_standalone_kvm_grub() {
+	local mode=$1
+	local output=$2
+	local extra=
+	local config="$WORK_DIR/surface-kvm-grub-$mode.cfg"
+	local grub_dir=${GRUB_MODULE_DIR:-}
+
+	if [[ -z "$grub_dir" ]]; then
+		if [[ -f "$STAGE_DIR/boot/grub/arm64-efi/kernel.img" ]]; then
+			grub_dir="$STAGE_DIR/boot/grub/arm64-efi"
+		else
+			grub_dir=/usr/lib/grub/arm64-efi
+		fi
+	fi
+	[[ -f "$grub_dir/kernel.img" && -f "$grub_dir/modinfo.sh" ]] || die "ARM64 GRUB kernel.img not found in $grub_dir (install grub-efi-arm64-bin or set GRUB_MODULE_DIR)"
+
+	if [[ "$mode" == terminal ]]; then
+		extra=" proxtui"
+	fi
+
+	cat >"$config" <<EOF
+set timeout=0
+insmod iso9660
+search --no-floppy --file --set=root /boot/linux26
+echo 'Loading Surface EL2/KVM installer ...'
+linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1$extra
+devicetree /boot/$EL2_DTB_NAME
+initrd /boot/initrd.img
+boot
+EOF
+
+	grub-mkstandalone \
+		-d "$grub_dir" \
+		-O arm64-efi \
+		--disable-shim-lock \
+		--modules='efi_gop iso9660 search_fs_file linux fdt' \
+		-o "$output" \
+		"/grub.cfg=$config" >/dev/null
+	rm -f -- "$config"
+}
+
+install_kvm_iso_bridge() {
+	local efi_image=$1
+	local bridge_dir="$STAGE_DIR/EFI/BOOT"
+
+	mkdir -p "$bridge_dir"
+	log "Installing ISO EL2/KVM Secure Launch bridge"
+	# The chainloaded launcher sees the ISO filesystem as its device volume.
+	# Keep every file it needs on that same filesystem rather than relying on
+	# the read-only EFI system image's GRUB environment.
+	mcopy -i "$efi_image" ::/EFI/BOOT/surface-kvm-entry.efi \
+		"$bridge_dir/surface-kvm-entry.efi"
+	mcopy -i "$efi_image" ::/EFI/BOOT/slbounceaa64.efi \
+		"$bridge_dir/slbounceaa64.efi"
+	mcopy -i "$efi_image" ::/tcblaunch.exe "$STAGE_DIR/tcblaunch.exe"
+	cp --preserve=mode,timestamps "$EL2_DTB_FILE" \
+		"$STAGE_DIR/surface-laptop-13-el2.dtb"
+
+	# The loader chooses the terminal image from its own chainloader filename.
+	cp --preserve=mode,timestamps "$bridge_dir/surface-kvm-entry.efi" \
+		"$bridge_dir/surface-kvm-entry-terminal.efi"
+	build_standalone_kvm_grub graphical \
+		"$bridge_dir/surface-kvm-grubaa64.efi"
+	build_standalone_kvm_grub terminal \
+		"$bridge_dir/surface-kvm-grub-terminal.efi"
 }
 
 augment_initrd_with_modules() {
@@ -323,6 +426,8 @@ verify_iso() {
 	grep -Fq "Path = boot/$dtb_path" "$listing" || die "Surface DTB is missing from output ISO"
 	if [[ -n "$el2_dtb_path" ]]; then
 		grep -Fq "Path = boot/$el2_dtb_path" "$listing" || die "EL2 DTB is missing from output ISO"
+		grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
+		grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
 	fi
 	xorriso -indev "$output_iso" -report_el_torito as_mkisofs >/dev/null
 	rm -f -- "$listing"
@@ -337,6 +442,10 @@ main() {
 	need sed
 	need grep
 	need file
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		need mcopy
+		need grub-mkstandalone
+	fi
 
 	if [[ "$WORK_DIR" == "$DEFAULT_WORK_DIR" ]]; then
 		WORK_DIR="$OUTPUT_DIR/.work"
@@ -358,6 +467,9 @@ main() {
 	KERNEL_SOURCE=$(absolute_path "$KERNEL_SOURCE")
 	KERNEL_IMAGE=$(absolute_path "$KERNEL_IMAGE")
 	DTB_FILE=$(absolute_path "$DTB_FILE")
+	if [[ -n "$GRUB_MODULE_DIR" ]]; then
+		GRUB_MODULE_DIR=$(absolute_path "$GRUB_MODULE_DIR")
+	fi
 	if [[ -n "$INITRD_FILE" ]]; then
 		INITRD_FILE=$(absolute_path "$INITRD_FILE")
 	fi
@@ -380,6 +492,7 @@ main() {
 	fi
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		[[ -f "$EL2_DTB_FILE" ]] || die "EL2 DTB not found: $EL2_DTB_FILE"
+		[[ -n "$EFI_IMAGE" ]] || die "--efi-image is required with --el2-dtb (it supplies the Secure Launch bridge)"
 	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
@@ -406,6 +519,9 @@ main() {
 	if [[ -n "$EFI_IMAGE" ]]; then
 		cp --preserve=mode,timestamps "$EFI_IMAGE" "$STAGE_DIR/efi.img"
 	fi
+	if [[ -n "$EL2_DTB_FILE" ]]; then
+		install_kvm_iso_bridge "$EFI_IMAGE"
+	fi
 	if [[ -n "$INITRD_FILE" ]]; then
 		cp --preserve=mode,timestamps "$INITRD_FILE" "$STAGE_DIR/boot/initrd.img"
 	fi
@@ -414,7 +530,8 @@ main() {
 	fi
 	patch_grub_config "$STAGE_DIR/boot/grub/grub.cfg" "$DTB_NAME"
 	if [[ -n "$EL2_DTB_FILE" ]]; then
-		append_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg" "$EL2_DTB_NAME"
+		remove_existing_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
+		append_el2_grub_entries "$STAGE_DIR/boot/grub/grub.cfg"
 	fi
 
 	rm -f -- "$OUTPUT_ISO"

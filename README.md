@@ -65,6 +65,11 @@ overlay, a separate GRUB entry, and a Secure Launch EFI image built by
 required by that Secure Launch step; Secure Boot must be disabled unless the
 custom launcher is signed.
 
+The normal firmware path must remain the original Proxmox shim. Only the
+explicit EL2/KVM GRUB entry may chainload `surface-kvm-entry.efi`; putting the
+Secure Launch launcher in the default `BOOTAA64.EFI` path causes the hook to be
+installed twice and can hang at `Loading initial ramdisk`.
+
 Build the EFI launcher from a normal Proxmox EFI image and add the optional
 EL2 entry to a patched installer ISO as follows:
 
@@ -80,8 +85,10 @@ export SURFACE_WORK_DIR=build/.work
   --base-efi build/surface-normal-efi.img \
   --output build/surface-kvm-efi.img \
   --tcb attachments/tcblaunch.exe \
-  --slbounce-source /path/to/slbounce
+  --slbounce-source /path/to/slbounce \
+  --el2-dtb build/.work/dtb/surface-laptop-13-el2.dtb
 
+GRUB_MODULE_DIR=/usr/lib/grub/arm64-efi \
 ./build-proxmox-iso.sh \
   --iso proxmox-ve_9.2-1-arm64.iso \
   --output build/proxmox-ve_9.2-1-arm64-surface-kvm.iso \
@@ -95,7 +102,10 @@ export SURFACE_WORK_DIR=build/.work
 `--qebspil`/`--qebspil-source` can add the optional Qualcomm DSP pre-boot
 loader, and `--firmware-tree` copies an additional firmware tree into the EFI
 image. The normal EL1 DTB remains separate so non-KVM boots and hardware
-variants can continue to use their own menu entries.
+variants can continue to use their own menu entries. The ISO KVM entries
+chainload a Secure Launch bridge on the ISO filesystem, then boot the selected
+EL2 DTB and installer initramfs; they do not rely on a writable GRUB
+environment.
 
 
 ## Using on your own install

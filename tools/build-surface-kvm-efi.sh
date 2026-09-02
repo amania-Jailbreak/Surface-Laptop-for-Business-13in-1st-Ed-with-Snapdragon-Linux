@@ -10,6 +10,7 @@ SLBOUNCE_SOURCE=${SLBOUNCE_SOURCE:-}
 QEBSPIL_EFI=${QEBSPIL_EFI:-}
 QEBSPIL_SOURCE=${QEBSPIL_SOURCE:-}
 FIRMWARE_TREE=${FIRMWARE_TREE:-}
+EL2_DTB=${EL2_DTB:-}
 GNUEFI_DIR=${GNUEFI_DIR:-}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/kvm-efi}
 IMAGE_SIZE=${IMAGE_SIZE:-32M}
@@ -56,6 +57,7 @@ Options:
   --qebspil FILE        Optional prebuilt qebspilaa64.efi.
   --qebspil-source DIR Build optional qebspil from this source tree when needed.
   --firmware-tree DIR   Optional firmware tree copied below /firmware.
+  --el2-dtb FILE        Copy an EL2 DTB and build a chainloadable KVM launcher.
   --work DIR            Build scratch directory.
   --size SIZE           FAT image size accepted by truncate (default: 32M).
   -h, --help            Show this help.
@@ -90,6 +92,9 @@ parse_args() {
 				;;
 			--firmware-tree)
 				shift; (($#)) || die "--firmware-tree needs a directory"; FIRMWARE_TREE=$1
+				;;
+			--el2-dtb)
+				shift; (($#)) || die "--el2-dtb needs a file"; EL2_DTB=$1
 				;;
 			--work)
 				shift; (($#)) || die "--work needs a directory"; WORK_DIR=$1
@@ -145,8 +150,9 @@ build_qebspil_if_needed() {
 	fi
 }
 
-build_loader() {
-	local cc objcopy gnuefi_out crt0 loader_o loader_so loader_efi
+build_loader_variant() {
+	local variant=$1 loader_efi=$2 dtb_define=${3:-}
+	local cc objcopy gnuefi_out crt0 loader_o loader_so
 	if [[ -z "$GNUEFI_DIR" && -n "$SLBOUNCE_SOURCE" ]]; then
 		GNUEFI_DIR="$SLBOUNCE_SOURCE/external/gnu-efi"
 	fi
@@ -164,9 +170,8 @@ build_loader() {
 	crt0="$gnuefi_out/gnuefi/crt0-efi-aarch64.o"
 	[[ -f "$crt0" ]] || die "gnu-efi crt0 not found: $crt0"
 
-	loader_o="$WORK_DIR/surface-kvm-loader.o"
-	loader_so="$WORK_DIR/surface-kvm-loader.so"
-	loader_efi="$WORK_DIR/bootaa64.efi"
+	loader_o="$WORK_DIR/surface-kvm-loader-$variant.o"
+	loader_so="$WORK_DIR/surface-kvm-loader-$variant.so"
 	mkdir -p "$WORK_DIR"
 	local cflags=(
 		-I"$GNUEFI_DIR/inc"
@@ -177,6 +182,9 @@ build_loader() {
 	)
 	if [[ -n "$QEBSPIL_EFI" ]]; then
 		cflags+=(-DSURFACE_KVM_LOAD_QEBSPIL)
+	fi
+	if [[ -n "$dtb_define" ]]; then
+		cflags+=("$dtb_define")
 	fi
 	"$cc" "${cflags[@]}" -c "$ROOT_DIR/tools/surface-kvm-loader.c" -o "$loader_o"
 	"$cc" \
@@ -190,6 +198,14 @@ build_loader() {
 		-j .rel* -j .rela* -j .reloc -j .eh_frame -O binary \
 		"$loader_so" "$loader_efi"
 	printf '%s\n' "$loader_efi"
+}
+
+build_loader() {
+	build_loader_variant normal "$WORK_DIR/bootaa64.efi"
+}
+
+build_el2_loader() {
+	build_loader_variant el2 "$WORK_DIR/surface-kvm-entry.efi" -DSURFACE_KVM_INSTALL_DTB
 }
 
 find_base_file() {
@@ -235,6 +251,10 @@ main() {
 	OUTPUT=$(absolute_path "$OUTPUT")
 	TCBLAUNCH=$(absolute_path "$TCBLAUNCH")
 	WORK_DIR=$(absolute_path "$WORK_DIR")
+	if [[ -n "$EL2_DTB" ]]; then
+		EL2_DTB=$(absolute_path "$EL2_DTB")
+		[[ -f "$EL2_DTB" ]] || die "EL2 DTB not found: $EL2_DTB"
+	fi
 	[[ -f "$BASE_EFI" ]] || die "base EFI image not found: $BASE_EFI"
 	[[ -f "$TCBLAUNCH" ]] || die "tcblaunch.exe not found: $TCBLAUNCH"
 
@@ -243,6 +263,11 @@ main() {
 	local loader_efi
 	loader_efi=$(build_loader | tail -n 1)
 	[[ -f "$loader_efi" ]] || die "EFI launcher was not built: $loader_efi"
+	local el2_loader_efi=
+	if [[ -n "$EL2_DTB" ]]; then
+		el2_loader_efi=$(build_el2_loader | tail -n 1)
+		[[ -f "$el2_loader_efi" ]] || die "EL2 EFI launcher was not built: $el2_loader_efi"
+	fi
 
 	mkdir -p "$WORK_DIR" "$(dirname -- "$OUTPUT")"
 	EXTRACT_DIR=$(mktemp -d "$WORK_DIR/base-efi.XXXXXX")
@@ -262,11 +287,26 @@ main() {
 	MTOOLS_SKIP_CHECK=1 mformat -i "$OUTPUT" -v SURFACEKVM :: >/dev/null
 	mmd -i "$OUTPUT" ::/EFI >/dev/null
 	mmd -i "$OUTPUT" ::/EFI/BOOT >/dev/null
+	if [[ -n "$EL2_DTB" ]]; then
+		mmd -i "$OUTPUT" ::/EFI/PROXMOX >/dev/null
+	fi
 	copy_efi_file "$grub" /EFI/BOOT/grubaa64.efi
 	copy_efi_file "$cfg" /EFI/BOOT/grub.cfg
 	copy_efi_file "$shim" /EFI/BOOT/shimaa64.efi
-	copy_efi_file "$loader_efi" /EFI/BOOT/BOOTAA64.EFI
+	if [[ -n "$EL2_DTB" ]]; then
+		# The normal firmware path must not install slbounce before the
+		# KVM chainloader does so.  Installing the hook twice would make
+		# ExitBootServices recurse into itself.
+		copy_efi_file "$shim" /EFI/BOOT/BOOTAA64.EFI
+	else
+		copy_efi_file "$loader_efi" /EFI/BOOT/BOOTAA64.EFI
+	fi
 	copy_efi_file "$SLBOUNCE_EFI" /EFI/BOOT/slbounceaa64.efi
+	if [[ -n "$EL2_DTB" ]]; then
+		copy_efi_file "$el2_loader_efi" /EFI/BOOT/surface-kvm-entry.efi
+		copy_efi_file "$el2_loader_efi" /EFI/PROXMOX/surface-kvm-entry.efi
+		copy_efi_file "$EL2_DTB" /surface-laptop-13-el2.dtb
+	fi
 	copy_efi_file "$TCBLAUNCH" /tcblaunch.exe
 	if [[ -n "$QEBSPIL_EFI" ]]; then
 		copy_efi_file "$QEBSPIL_EFI" /EFI/BOOT/qebspilaa64.efi
@@ -276,7 +316,7 @@ main() {
 	printf '\nSurface KVM EFI image: %s\n' "$OUTPUT"
 	file "$OUTPUT"
 	sha256sum "$OUTPUT"
-	7z l "$OUTPUT" | grep -E 'tcblaunch|BOOTAA64|slbounce|qebspil|grub|shim|firmware' || true
+	7z l "$OUTPUT" | grep -E 'tcblaunch|BOOTAA64|surface-kvm-entry|surface-laptop-13-el2|slbounce|qebspil|grub|shim|firmware' || true
 }
 
 main "$@"
