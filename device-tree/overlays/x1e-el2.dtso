@@ -1,83 +1,70 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Qualcomm X1 EL2 changes.
+ * Qualcomm X1P42100 EL2 changes.
  *
  * The Qualcomm firmware normally starts UEFI/Linux in EL1.  When Secure
  * Launch hands EL2 to Linux, the PCIe SMMU must be owned by Linux and the
  * zap shader and SBSA watchdog must not be accessed by the EL2 kernel.
  * Keep this as an overlay so the normal EL1 DTB remains usable.
+ *
+ * The node labels match the upstream qcom x1-el2.dtso overlay.  They are
+ * declared in the retained base DTS so fdtoverlay can resolve phandles rather
+ * than relying on the numeric phandles of one particular decompiled DTB.
  */
 
 /dts-v1/;
 /plugin/;
 
-/ {
-	compatible = "qcom,x1e80100";
+&{/chosen} {
+	dtbhack-el2-overlay = "x1p42100-el2";
 };
 
-&{/} {
-	chosen {
-		dtbhack-el2-overlay = "x1e-el2";
-	};
-};
-
-&{/soc@0/gpu@3d00000/zap-shader} {
+&gpu_zap_shader {
 	status = "disabled";
 };
 
 /* The video block is not usable until its EL2 firmware path is implemented. */
-&{/soc@0/video-codec@aa00000} {
+&iris {
 	status = "disabled";
 };
 
-&{/soc@0} {
-	pcie_smmu: iommu@15400000 {
-		compatible = "arm,smmu-v3";
-		reg = <0 0x15400000 0 0x80000>;
-		interrupts = <0 /* GIC_SPI */ 138 1 /* IRQ_TYPE_EDGE_RISING */>,
-				     <0 /* GIC_SPI */ 134 1 /* IRQ_TYPE_EDGE_RISING */>,
-				     <0 /* GIC_SPI */ 136 1 /* IRQ_TYPE_EDGE_RISING */>;
-		interrupt-names = "eventq", "gerror", "cmdq-sync";
-		#iommu-cells = <1>;
-		dma-coherent;
-		status = "okay";
-	};
+&pcie_smmu {
+	status = "okay";
 };
 
-/* Give Linux the PCIe stream IDs used by every X1e PCIe controller. */
-&{/soc@0/pcie@1bd0000} {
+/* Give Linux the PCIe stream IDs used by every X1P PCIe controller. */
+&pcie3 {
 	iommu-map = <0 &pcie_smmu 0x30000 0x10000>;
-	msi-map = <0 0x93 0xb0000 0x10000>;
+	msi-map = <0 &gic_its 0xb0000 0x10000>;
 };
 
-&{/soc@0/pci@1bf8000} {
+&pcie6a {
 	iommu-map = <0 &pcie_smmu 0x60000 0x10000>;
 };
 
-&{/soc@0/pci@1c00000} {
+&pcie5 {
 	iommu-map = <0 &pcie_smmu 0x50000 0x10000>;
-	msi-map = <0 0x93 0xd0000 0x10000>;
+	msi-map = <0 &gic_its 0xd0000 0x10000>;
 };
 
-&{/soc@0/pci@1c08000} {
+&pcie4 {
 	iommu-map = <0 &pcie_smmu 0x40000 0x10000>;
 };
 
 /* These coprocessors are owned by Linux only after the EL2 transition. */
-&{/soc@0/remoteproc@6800000} {
-	/* apps_smmu is phandle 0x33 in the measured X1P42100 DTB. */
-	iommus = <0x33 0x1000 0x80>;
+&remoteproc_adsp {
+	iommus = <&apps_smmu 0x1000 0x80>;
 };
 
-&{/soc@0/remoteproc@32300000} {
-	iommus = <0x33 0x0c00 0x0>;
+&remoteproc_cdsp {
+	iommus = <&apps_smmu 0x0c00 0x0>;
 };
 
 /* The APSS watchdog is Linux-owned in EL2; the SBSA watchdog is not. */
-&{/soc@0/watchdog@17410000} {
+&apss_watchdog {
 	status = "okay";
 };
 
-&{/soc@0/watchdog@1c840000} {
+&sbsa_watchdog {
 	status = "disabled";
 };

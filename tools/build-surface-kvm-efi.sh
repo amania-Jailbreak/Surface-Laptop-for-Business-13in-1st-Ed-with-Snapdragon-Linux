@@ -225,6 +225,9 @@ copy_firmware_tree() {
 	FIRMWARE_TREE=$(absolute_path "$FIRMWARE_TREE")
 	[[ -d "$FIRMWARE_TREE" ]] || die "firmware tree not found: $FIRMWARE_TREE"
 	log "Copying optional firmware tree"
+	# Create the parent before adding nested paths.  mmd does not create
+	# missing ancestors, and the loop below intentionally starts at depth 1.
+	mmd -i "$OUTPUT" ::/firmware >/dev/null
 	while IFS= read -r -d '' dir; do
 		relative=${dir#"$FIRMWARE_TREE"/}
 		[[ "$relative" == "$dir" ]] && continue
@@ -305,7 +308,11 @@ main() {
 	if [[ -n "$EL2_DTB" ]]; then
 		copy_efi_file "$el2_loader_efi" /EFI/BOOT/surface-kvm-entry.efi
 		copy_efi_file "$el2_loader_efi" /EFI/PROXMOX/surface-kvm-entry.efi
+		# The installed standalone GRUB variant may use $cmdpath and load
+		# the payload next to itself.  Keep the EL2 DTB there as well as at
+		# the FAT root used by the launcher and qebspil.
 		copy_efi_file "$EL2_DTB" /surface-laptop-13-el2.dtb
+		copy_efi_file "$EL2_DTB" /EFI/BOOT/surface-laptop-13-el2.dtb
 	fi
 	copy_efi_file "$TCBLAUNCH" /tcblaunch.exe
 	if [[ -n "$QEBSPIL_EFI" ]]; then

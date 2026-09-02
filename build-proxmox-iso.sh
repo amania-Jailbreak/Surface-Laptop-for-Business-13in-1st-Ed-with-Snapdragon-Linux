@@ -316,13 +316,14 @@ EOF
 		--disable-shim-lock \
 		--modules='efi_gop iso9660 search_fs_file linux fdt' \
 		-o "$output" \
-		"/grub.cfg=$config" >/dev/null
+		"/boot/grub/grub.cfg=$config" >/dev/null
 	rm -f -- "$config"
 }
 
 install_kvm_iso_bridge() {
 	local efi_image=$1
 	local bridge_dir="$STAGE_DIR/EFI/BOOT"
+	local payload_dir payload_listing
 
 	mkdir -p "$bridge_dir"
 	log "Installing ISO EL2/KVM Secure Launch bridge"
@@ -336,6 +337,33 @@ install_kvm_iso_bridge() {
 	mcopy -i "$efi_image" ::/tcblaunch.exe "$STAGE_DIR/tcblaunch.exe"
 	cp --preserve=mode,timestamps "$EL2_DTB_FILE" \
 		"$STAGE_DIR/surface-laptop-13-el2.dtb"
+	# Keep the same DTB beside the EFI bridge too.  This is needed by
+	# standalone GRUB variants that load their payload relative to $cmdpath,
+	# and avoids leaving an older DTB in EFI/BOOT when an existing stage is
+	# reused.
+	cp --preserve=mode,timestamps "$EL2_DTB_FILE" \
+		"$bridge_dir/surface-laptop-13-el2.dtb"
+
+	# qebspil and its firmware are optional, but when the supplied EFI image
+	# contains them the ISO bridge must carry them on the same ISO filesystem.
+	# The launcher starts qebspil from that filesystem after it has installed
+	# the EL2 DTB; relying on the El Torito FAT image alone does not work for
+	# an application chainloaded from ISO9660.
+	payload_dir=$(mktemp -d "$WORK_DIR/iso-kvm-payload.XXXXXX")
+	payload_listing=$(mktemp "$WORK_DIR/iso-kvm-payload-list.XXXXXX")
+	7z l -slt "$efi_image" >"$payload_listing"
+	if grep -Fq 'Path = EFI/BOOT/qebspilaa64.efi' "$payload_listing"; then
+		7z x -y -o"$payload_dir" "$efi_image" 'EFI/BOOT/qebspilaa64.efi' >/dev/null
+		cp --preserve=mode,timestamps "$payload_dir/EFI/BOOT/qebspilaa64.efi" \
+			"$bridge_dir/qebspilaa64.efi"
+	fi
+	if grep -Fq 'Path = firmware' "$payload_listing"; then
+		7z x -y -o"$payload_dir" "$efi_image" 'firmware/*' >/dev/null
+		mkdir -p "$STAGE_DIR/firmware"
+		cp -a "$payload_dir/firmware/." "$STAGE_DIR/firmware/"
+	fi
+	rm -f -- "$payload_listing"
+	rm -rf -- "$payload_dir"
 
 	# The loader chooses the terminal image from its own chainloader filename.
 	cp --preserve=mode,timestamps "$bridge_dir/surface-kvm-entry.efi" \

@@ -288,7 +288,7 @@ build_dtb() {
 		set -- $property
 		[[ "$(fdtget "$el2_dtb" "$1" "$2")" == "$3" ]] || die "EL2 DTB property is not $3: $1 $2"
 	done
-	[[ "$(fdtget "$el2_dtb" /chosen dtbhack-el2-overlay)" == x1e-el2 ]] || die "EL2 DTB marker is missing"
+	[[ "$(fdtget "$el2_dtb" /chosen dtbhack-el2-overlay)" == x1p42100-el2 ]] || die "EL2 DTB marker is missing"
 	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 0 is not host"
 	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 1 is not host"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
@@ -469,7 +469,7 @@ verify() {
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "current DTB USB-C port 0 is not host"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "current DTB USB-C port 1 is not host"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-current.dtb" /soc@0/ufshc@1d84000 status)" == okay ]] || die "current DTB UFS controller is disabled"
-	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /chosen dtbhack-el2-overlay)" == x1e-el2 ]] || die "EL2 DTB marker is missing"
+	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /chosen dtbhack-el2-overlay)" == x1p42100-el2 ]] || die "EL2 DTB marker is missing"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/gpu@3d00000/zap-shader status)" == disabled ]] || die "EL2 zap shader is not disabled"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/iommu@15400000 status)" == okay ]] || die "EL2 PCIe SMMU is not enabled"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-el2.dtb" /soc@0/watchdog@1c840000 status)" == disabled ]] || die "EL2 SBSA watchdog is not disabled"

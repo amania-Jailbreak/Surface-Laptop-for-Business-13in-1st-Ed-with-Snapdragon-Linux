@@ -92,6 +92,74 @@ static void write_state(EFI_HANDLE device, CHAR8 *state)
 	uefi_call_wrapper(volume->Close, 1, volume);
 }
 
+/*
+ * GRUB can start an EFI application with a device handle that does not carry
+ * EFI_SIMPLE_FILE_SYSTEM_PROTOCOL, even when the application itself came
+ * from a FAT ESP.  Do not make the rest of the launcher depend on that
+ * handle.  Locate the ESP which contains one of our payload files instead.
+ */
+static EFI_STATUS volume_file_status(EFI_HANDLE device, CHAR16 *filename)
+{
+	EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+	EFI_FILE_IO_INTERFACE *io = NULL;
+	EFI_FILE_HANDLE volume = NULL;
+	EFI_FILE_HANDLE file = NULL;
+	EFI_STATUS status;
+
+	status = uefi_call_wrapper(BS->HandleProtocol, 3, device, &fs_guid,
+					   (VOID **)&io);
+	if (EFI_ERROR(status) || !io)
+		return EFI_NOT_FOUND;
+
+	status = uefi_call_wrapper(io->OpenVolume, 2, io, &volume);
+	if (EFI_ERROR(status) || !volume)
+		return status;
+
+	status = uefi_call_wrapper(volume->Open, 5, volume, &file, filename,
+					   EFI_FILE_MODE_READ, 0);
+	if (file)
+		uefi_call_wrapper(file->Close, 1, file);
+	uefi_call_wrapper(volume->Close, 1, volume);
+	return status;
+}
+
+static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *marker,
+					      EFI_HANDLE *result)
+{
+	EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
+	EFI_HANDLE *handles = NULL;
+	UINTN handle_count = 0;
+	UINTN index;
+	EFI_STATUS status;
+
+	if (!marker || !result)
+		return EFI_INVALID_PARAMETER;
+	*result = NULL;
+
+	if (preferred && !EFI_ERROR(volume_file_status(preferred, marker))) {
+		*result = preferred;
+		return EFI_SUCCESS;
+	}
+
+	status = uefi_call_wrapper(BS->LocateHandleBuffer, 5, ByProtocol,
+					   &fs_guid, NULL, &handle_count, &handles);
+	if (EFI_ERROR(status))
+		return status;
+
+	status = EFI_NOT_FOUND;
+	for (index = 0; index < handle_count; index++) {
+		if (!EFI_ERROR(volume_file_status(handles[index], marker))) {
+			*result = handles[index];
+			status = EFI_SUCCESS;
+			break;
+		}
+	}
+
+	if (handles)
+		FreePool(handles);
+	return status;
+}
+
 #ifdef SURFACE_KVM_INSTALL_DTB
 static EFI_STATUS install_el2_dtb(EFI_HANDLE device)
 {
@@ -204,7 +272,9 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 {
 	EFI_GUID loaded_image_guid = LOADED_IMAGE_PROTOCOL;
 	EFI_LOADED_IMAGE *loaded_image = NULL;
+	EFI_HANDLE device = NULL;
 	EFI_STATUS status;
+	CHAR16 *payload_marker = L"\\EFI\\BOOT\\slbounceaa64.efi";
 
 	InitializeLib(image, system_table);
 
@@ -215,43 +285,53 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 		Print(L"surface-kvm: cannot locate the boot volume: %r\n", status);
 		return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
 	}
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"launcher-start\n");
+#ifdef SURFACE_KVM_INSTALL_DTB
+	payload_marker = L"\\surface-laptop-13-el2.dtb";
+#endif
+	status = find_payload_device(loaded_image->DeviceHandle, payload_marker,
+					     &device);
+	if (EFI_ERROR(status)) {
+		Print(L"surface-kvm: payload volume not found: %r\n", status);
+		return status;
+	}
+
+	write_state(device, (CHAR8 *)"launcher-start\n");
 
 #ifdef SURFACE_KVM_INSTALL_DTB
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"dtb-start\n");
-	status = install_el2_dtb(loaded_image->DeviceHandle);
+	write_state(device, (CHAR8 *)"dtb-start\n");
+	status = install_el2_dtb(device);
 	if (EFI_ERROR(status)) {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"dtb-fail\n");
+		write_state(device, (CHAR8 *)"dtb-fail\n");
 		Print(L"surface-kvm: EL2 DTB install failed: %r\n", status);
 		return status;
 	}
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"dtb-ok\n");
+	write_state(device, (CHAR8 *)"dtb-ok\n");
 #endif
 
 #ifdef SURFACE_KVM_LOAD_QEBSPIL
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"qebspil-start\n");
+	write_state(device, (CHAR8 *)"qebspil-start\n");
 	Print(L"surface-kvm: loading qebspil...\n");
-	status = start_image_from_volume(image, loaded_image->DeviceHandle,
+	status = start_image_from_volume(image, device,
 					 L"\\EFI\\BOOT\\qebspilaa64.efi");
 	if (EFI_ERROR(status)) {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"qebspil-fail\n");
+		write_state(device, (CHAR8 *)"qebspil-fail\n");
 		Print(L"surface-kvm: qebspil failed: %r\n", status);
 		return status;
 	}
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"qebspil-ok\n");
+	write_state(device, (CHAR8 *)"qebspil-ok\n");
 #endif
 
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"slbounce-start\n");
+	write_state(device, (CHAR8 *)"slbounce-start\n");
 	Print(L"surface-kvm: loading Secure Launch driver...\n");
-	status = start_image_from_volume(image, loaded_image->DeviceHandle,
+	status = start_image_from_volume(image, device,
 					 L"\\EFI\\BOOT\\slbounceaa64.efi");
 	if (EFI_ERROR(status)) {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"slbounce-fail\n");
+		write_state(device, (CHAR8 *)"slbounce-fail\n");
 		Print(L"surface-kvm: slbounce failed: %r\n", status);
 		Print(L"surface-kvm: check tcblaunch.exe and Secure Boot state.\n");
 		return status;
 	}
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"slbounce-ok\n");
+	write_state(device, (CHAR8 *)"slbounce-ok\n");
 
 	/*
 	 * An installer ISO cannot persist GRUB's next_entry in its read-only
@@ -260,24 +340,24 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	 * normal shim, which consumes the next_entry written by the outer GRUB
 	 * menu entry.
 	 */
-	write_state(loaded_image->DeviceHandle, (CHAR8 *)"grub-start\n");
+	write_state(device, (CHAR8 *)"grub-start\n");
 	Print(L"surface-kvm: Secure Launch hook installed; looking for KVM GRUB...\n");
 	CHAR16 *grub_filename = L"\\EFI\\BOOT\\surface-kvm-grubaa64.efi";
 	if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-terminal"))
 		grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-terminal.efi";
-	status = start_image_from_volume(image, loaded_image->DeviceHandle,
+	status = start_image_from_volume(image, device,
 					 grub_filename);
 	if (status == EFI_NOT_FOUND) {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"shim-start\n");
+		write_state(device, (CHAR8 *)"shim-start\n");
 		Print(L"surface-kvm: KVM GRUB not present; starting Proxmox shim...\n");
-		status = start_image_from_volume(image, loaded_image->DeviceHandle,
-					 L"\\EFI\\BOOT\\shimaa64.efi");
+		status = start_image_from_volume(image, device,
+						 L"\\EFI\\BOOT\\shimaa64.efi");
 	}
 	if (EFI_ERROR(status)) {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"next-stage-fail\n");
+		write_state(device, (CHAR8 *)"next-stage-fail\n");
 		Print(L"surface-kvm: next boot stage failed: %r\n", status);
 	} else {
-		write_state(loaded_image->DeviceHandle, (CHAR8 *)"next-stage-ok\n");
+		write_state(device, (CHAR8 *)"next-stage-ok\n");
 	}
 
 	return status;
