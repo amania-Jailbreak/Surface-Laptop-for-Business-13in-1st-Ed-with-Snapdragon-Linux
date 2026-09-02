@@ -247,52 +247,28 @@ copy_firmware_tree() {
 
 install_shell_path() {
 	local startup="$WORK_DIR/surface-kvm-startup.nsh"
+	local fs_index
 
 	[[ -n "$SHELL_EFI" ]] || return 0
 	cat >"$startup" <<'EOF'
 @echo -off
 map -r
+EOF
 
-if exist fs0:\EFI\BOOT\slbounceaa64.efi then
-  fs0:
+	# Some Surface firmware exposes many partition aliases before the ESP.
+	# Generate enough explicit Shell syntax to find the payload regardless of
+	# which FS alias the firmware assigned; this is more portable than relying
+	# on Shell loop syntax, which differs between Shell implementations.
+	for ((fs_index = 0; fs_index < 256; fs_index++)); do
+		cat >>"$startup" <<EOF
+if exist fs${fs_index}:\EFI\BOOT\slbounceaa64.efi then
+  fs${fs_index}:
   goto surface_kvm_launch
 endif
-if exist fs1:\EFI\BOOT\slbounceaa64.efi then
-  fs1:
-  goto surface_kvm_launch
-endif
-if exist fs2:\EFI\BOOT\slbounceaa64.efi then
-  fs2:
-  goto surface_kvm_launch
-endif
-if exist fs3:\EFI\BOOT\slbounceaa64.efi then
-  fs3:
-  goto surface_kvm_launch
-endif
-if exist fs4:\EFI\BOOT\slbounceaa64.efi then
-  fs4:
-  goto surface_kvm_launch
-endif
-if exist fs5:\EFI\BOOT\slbounceaa64.efi then
-  fs5:
-  goto surface_kvm_launch
-endif
-if exist fs6:\EFI\BOOT\slbounceaa64.efi then
-  fs6:
-  goto surface_kvm_launch
-endif
-if exist fs7:\EFI\BOOT\slbounceaa64.efi then
-  fs7:
-  goto surface_kvm_launch
-endif
-if exist fs8:\EFI\BOOT\slbounceaa64.efi then
-  fs8:
-  goto surface_kvm_launch
-endif
-if exist fs9:\EFI\BOOT\slbounceaa64.efi then
-  fs9:
-  goto surface_kvm_launch
-endif
+EOF
+	done
+
+	cat >>"$startup" <<'EOF'
 
 echo surface-kvm: EFI Shell could not find the KVM payload volume
 pause
