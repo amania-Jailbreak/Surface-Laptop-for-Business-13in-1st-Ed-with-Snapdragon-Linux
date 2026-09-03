@@ -3701,6 +3701,7 @@
 			dma-coherent;
 			status = "okay";
 			dr_mode = "host";
+			qcom,keep-host-on-suspend;
 
 			ports {
 				#address-cells = <0x01>;
@@ -3752,6 +3753,7 @@
 			dma-coherent;
 			status = "okay";
 			dr_mode = "host";
+			qcom,keep-host-on-suspend;
 
 			ports {
 				#address-cells = <0x01>;
@@ -8369,6 +8371,8 @@
 		regulator-max-microvolt = <0x325aa0>;
 		gpio = <0xf0 0x1d 0x00>;
 		enable-active-high;
+		regulator-boot-on;
+		regulator-always-on;
 		startup-delay-us = <0x249f0>;
 		pinctrl-0 = <0x179>;
 		pinctrl-names = "default";
