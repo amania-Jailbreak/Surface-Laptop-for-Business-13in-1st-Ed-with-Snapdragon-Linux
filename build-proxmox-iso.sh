@@ -248,6 +248,17 @@ verify_efi_tcb() {
 	printf 'WARNING: EFI image contains unvalidated tcblaunch.exe (%s); X1P42100 may hang or reset\n' "$hash" >&2
 }
 
+verify_efi_slbounce() {
+	local efi_image=$1 marker
+	marker='surface-x1p: safe ExitBootServices cache mode'
+	if 7z e -so "$efi_image" EFI/BOOT/slbounceaa64.efi 2>/dev/null |
+		strings -el | grep -Fq "$marker"; then
+		printf 'EFI slbounce: X1P42100-safe ExitBootServices build\n'
+		return 0
+	fi
+	die "EFI image does not contain the X1P42100-safe slbounce build; rebuild it with --slbounce-source and tools/slbounce-x1p42100-safe-ebs.patch"
+}
+
 append_el2_grub_entries() {
 	local grub_cfg=$1
 
@@ -614,6 +625,7 @@ main() {
 		[[ -f "$EL2_DTB_FILE" ]] || die "EL2 DTB not found: $EL2_DTB_FILE"
 		[[ -n "$EFI_IMAGE" ]] || die "--efi-image is required with --el2-dtb (it supplies the Secure Launch bridge)"
 		verify_efi_tcb "$EFI_IMAGE"
+		verify_efi_slbounce "$EFI_IMAGE"
 	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"
