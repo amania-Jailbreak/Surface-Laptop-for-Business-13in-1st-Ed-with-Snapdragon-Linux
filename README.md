@@ -83,7 +83,8 @@ On X1P42100, upstream slbounce's global cache sweep can reset the machine inside
 `tools/slbounce-x1p42100-safe-ebs.patch`; it also fixes the unsafe handling of an
 `EFI_BUFFER_TOO_SMALL` memory-map response. The EL2 entries retain
 `clk_ignore_unused pd_ignore_unused` so Linux does not turn off resources still
-owned by the platform firmware, and `id_aa64mmfr0.ecv=1`, which is required
+owned by the platform firmware, `console=tty0 usbcore.autosuspend=-1` for
+reliable console and USB-root boot, and `id_aa64mmfr0.ecv=1`, which is required
 before starting KVM guests on X1P42100. Omitting the clock/power-domain
 arguments can reset the machine before the first userspace message.
 

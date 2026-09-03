@@ -17,7 +17,7 @@ EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
 # X1P42100 EL2 needs the clocks and power domains left on across the handoff.
 # Keep this overridable for other Qualcomm platforms with different firmware
 # ownership rules.
-EL2_KERNEL_ARGS=${EL2_KERNEL_ARGS:-"clk_ignore_unused pd_ignore_unused id_aa64mmfr0.ecv=1"}
+EL2_KERNEL_ARGS=${EL2_KERNEL_ARGS:-"clk_ignore_unused pd_ignore_unused console=tty0 usbcore.autosuspend=-1 id_aa64mmfr0.ecv=1"}
 KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1

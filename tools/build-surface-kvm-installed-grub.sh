@@ -12,7 +12,7 @@ INITRD_PATH=${INITRD_PATH:-/boot/initrd.img-7.2.0-rc5-surface-laptop-13}
 # X1P42100 EL2 boots must leave firmware-owned clocks and power domains on.
 # Without these two arguments the kernel may disable a resource still needed
 # by the EL2 transition and reset before the first userspace message.
-KERNEL_EXTRA_ARGS=${KERNEL_EXTRA_ARGS-"clk_ignore_unused pd_ignore_unused id_aa64mmfr0.ecv=1 loglevel=7 ignore_loglevel panic=-1"}
+KERNEL_EXTRA_ARGS=${KERNEL_EXTRA_ARGS-"clk_ignore_unused pd_ignore_unused console=tty0 usbcore.autosuspend=-1 id_aa64mmfr0.ecv=1 loglevel=7 ignore_loglevel panic=-1"}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/installed-kvm-grub}
 PAYLOAD_MODE=root
 
@@ -53,8 +53,8 @@ Options:
   --initrd PATH       initramfs path as seen by GRUB.
   --kernel-extra-args ARGS
                       Additional kernel arguments (default: preserve X1P EL2
-                      clocks/power domains, ECV override, verbose logging, and
-                      no automatic reboot after a panic).
+                      clocks/power domains, console/USB safety, ECV override,
+                      verbose logging, and no automatic reboot after a panic).
   --payload-from-esp  Load kernel, DTB and initramfs from the ESP's
                       /EFI/BOOT directory selected by --esp-uuid.
   --payload-from-cmdpath
