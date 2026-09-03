@@ -14,6 +14,10 @@ INITRD_FILE=${INITRD_FILE:-}
 EFI_IMAGE=${EFI_IMAGE:-}
 EL2_DTB_FILE=${EL2_DTB_FILE:-}
 EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
+# X1P42100 EL2 needs the clocks and power domains left on across the handoff.
+# Keep this overridable for other Qualcomm platforms with different firmware
+# ownership rules.
+EL2_KERNEL_ARGS=${EL2_KERNEL_ARGS:-"clk_ignore_unused pd_ignore_unused id_aa64mmfr0.ecv=1"}
 KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1
@@ -295,7 +299,7 @@ menuentry 'Install Proxmox VE (Surface EL2/KVM via EFI Shell)' --id surface-el2-
 
 menuentry 'Install Proxmox VE (Graphical, EL2/KVM after EFI Shell)' --id surface-el2-kvm-shell-graphical --class debian --class gnu-linux --class gnu --class os {
     echo    'Loading Proxmox VE Installer with EL2 DTB after EFI Shell ...'
-    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KERNEL_ARGS
     devicetree /boot/$EL2_DTB_NAME
     initrd  /boot/initrd.img
 }
@@ -304,7 +308,7 @@ menuentry 'Install Proxmox VE (Terminal UI, EL2/KVM after EFI Shell)' --id surfa
     set background_color=black
     echo    'Loading Proxmox Console Installer with EL2 DTB after EFI Shell ...'
     gfxpayload=800x600x16,800x600
-    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxtui id_aa64mmfr0.ecv=1
+    linux   /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent proxtui $EL2_KERNEL_ARGS
     devicetree /boot/$EL2_DTB_NAME
     initrd  /boot/initrd.img
 }
@@ -370,7 +374,7 @@ set timeout=0
 insmod iso9660
 search --no-floppy --file --set=root /boot/linux26
 echo 'Loading Surface EL2/KVM installer ...'
-linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent id_aa64mmfr0.ecv=1$extra
+linux /boot/linux26 ro ramdisk_size=16777216 rw quiet splash=silent $EL2_KERNEL_ARGS$extra
 devicetree /boot/$EL2_DTB_NAME
 initrd /boot/initrd.img
 boot
