@@ -167,6 +167,10 @@ patch_features_present() {
 		0003-*) grep -q '0x07ad' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/panel/panel-edp.c" ;;
 		0004-*) grep -q 'qcom,keep-host-on-suspend' "$KERNEL_WORK_SOURCE/drivers/usb/dwc3/dwc3-qcom.c" ;;
 		0005-*) grep -q 'xhci_plat_keep_host_active' "$KERNEL_WORK_SOURCE/drivers/usb/host/xhci-plat.c" ;;
+		0006-*)
+			grep -q 'qcom,keep-edp-active-on-blank' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/msm/dp/dp_display.c" &&
+			grep -q 'keep-panel-prepared-on-disable' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/bridge/panel.c"
+		;;
 		*) return 1 ;;
 	esac
 }
@@ -335,6 +339,10 @@ build_dtb() {
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
 	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
+	for candidate in "$base_dtb" "$bluetooth_dtb" "$fingerprint_dtb" "$bluetooth_fingerprint_dtb"; do
+		fdtget "$candidate" /soc@0/display-subsystem@ae00000/displayport-controller@aea0000 qcom,keep-edp-active-on-blank >/dev/null 2>&1 || die "eDP blanking guard is missing in $candidate"
+		fdtget "$candidate" /soc@0/display-subsystem@ae00000/displayport-controller@aea0000/aux-bus/panel keep-panel-prepared-on-disable >/dev/null 2>&1 || die "eDP panel preparation guard is missing in $candidate"
+	done
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
