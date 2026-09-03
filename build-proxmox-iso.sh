@@ -530,7 +530,14 @@ verify_iso() {
 	local dtb_path=$2
 	local el2_dtb_path=${3:-}
 	local listing
+	local xorriso_input=$output_iso
 	[[ -s "$output_iso" ]] || die "output ISO was not created: $output_iso"
+	# xorriso treats paths below /dev as possible device nodes.  The build
+	# output may intentionally live in /dev/shm when the root filesystem is
+	# full, so explicitly select its regular-file stdio backend.
+	if [[ "$output_iso" == /dev/* ]]; then
+		xorriso_input="stdio:$output_iso"
+	fi
 	listing=$(mktemp "$WORK_DIR/iso-list.XXXXXX")
 	7z l -slt "$output_iso" >"$listing"
 	grep -Fq "Path = boot/linux26" "$listing" || die "patched kernel is missing from output ISO"
@@ -541,7 +548,7 @@ verify_iso() {
 		grep -Fqi "Path = EFI/BOOT/surface-kvm-entry.efi" "$listing" || die "EL2/KVM bridge launcher is missing from output ISO"
 		grep -Fqi "Path = EFI/BOOT/surface-kvm-grubaa64.efi" "$listing" || die "EL2/KVM standalone GRUB is missing from output ISO"
 	fi
-	xorriso -indev "$output_iso" -report_el_torito as_mkisofs >/dev/null
+	xorriso -indev "$xorriso_input" -report_el_torito as_mkisofs >/dev/null
 	rm -f -- "$listing"
 }
 
