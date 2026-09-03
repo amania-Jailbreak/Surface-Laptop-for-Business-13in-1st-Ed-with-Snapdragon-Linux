@@ -1,0 +1,23 @@
+From: Surface bringup contributors <surface-bringup@example.invalid>
+Subject: [PATCH] drm/panel-edp: recognize LGD 0x07ad panel
+
+The Surface Laptop for Business 13in 1st Ed with Snapdragon reports the
+LGD 0x07ad panel identity. Recognize it so panel-edp uses the measured
+panel timing delays instead of the generic conservative fallback.
+
+---
+ drivers/gpu/drm/panel/panel-edp.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/drivers/gpu/drm/panel/panel-edp.c b/drivers/gpu/drm/panel/panel-edp.c
+--- a/drivers/gpu/drm/panel/panel-edp.c
++++ b/drivers/gpu/drm/panel/panel-edp.c
+@@ -2138,5 +2138,6 @@ static const struct edp_panel_entry edp_panels[] = {
+	 EDP_PANEL_ENTRY('L', 'G', 'D', 0x06b2, &delay_200_500_e200_d200, "LP129WT232166"),
+	 EDP_PANEL_ENTRY('L', 'G', 'D', 0x0778, &delay_200_500_e200_d200, "134WT1"),
++	EDP_PANEL_ENTRY('L', 'G', 'D', 0x07ad, &delay_200_500_e200_d200, "LP130WU112423"),
+	 EDP_PANEL_ENTRY('L', 'G', 'D', 0x07fe, &delay_200_500_e200_d200, "LP116WHA-SPB1"),
+
+	 EDP_PANEL_ENTRY('S', 'H', 'P', 0x1511, &delay_200_500_e50, "LQ140M1JW48"),
+-- 
+2.43.0
