@@ -18,6 +18,10 @@ KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 BUILD_MISSING=1
 INCLUDE_MODULES=1
 GRUB_MODULE_DIR=${GRUB_MODULE_DIR:-}
+ALLOW_UNTESTED_TCB=${ALLOW_UNTESTED_TCB:-0}
+
+# X1P42100 reference TCB validated with the Surface Secure Launch path.
+KNOWN_GOOD_TCB_SHA256=5dfcd0253b6ee99499ab33cac221e8a9cea47f3fdf6d4e11de9a9f3c4770d03d
 
 DEFAULT_OUTPUT_ISO=$OUTPUT_ISO
 DEFAULT_WORK_DIR=$WORK_DIR
@@ -67,6 +71,7 @@ Options:
   --efi-image FILE    Replace the ISO EFI image (required for --el2-dtb).
   --initrd FILE       Replace the ISO initrd with this archive.
   --no-initrd-modules Keep the selected initrd without adding built modules.
+  --allow-untested-tcb Permit an EFI image containing another TCB build.
   --work DIR          Scratch directory (default: ./build/.work).
   --no-build           Fail if --kernel-image or --dtb is missing.
   -h, --help          Show this help.
@@ -138,6 +143,9 @@ parse_args() {
 				;;
 			--no-initrd-modules)
 				INCLUDE_MODULES=0
+				;;
+			--allow-untested-tcb)
+				ALLOW_UNTESTED_TCB=1
 				;;
 			--work)
 				shift
@@ -225,6 +233,19 @@ if patched == 0:
 path.write_text("".join(result), encoding="utf-8")
 print(f"patched GRUB entries: {patched}")
 PY
+}
+
+verify_efi_tcb() {
+	local efi_image=$1 hash
+	hash=$(7z e -so "$efi_image" tcblaunch.exe 2>/dev/null | sha256sum | cut -d ' ' -f1)
+	if [[ "$hash" == "$KNOWN_GOOD_TCB_SHA256" ]]; then
+		printf 'EFI TCB: validated X1P42100 build (%s)\n' "$hash"
+		return 0
+	fi
+	if [[ "$ALLOW_UNTESTED_TCB" -ne 1 ]]; then
+		die "EFI image contains unvalidated tcblaunch.exe ($hash); rebuild it with X1P42100 TCB SHA256 $KNOWN_GOOD_TCB_SHA256, or pass --allow-untested-tcb for another platform"
+	fi
+	printf 'WARNING: EFI image contains unvalidated tcblaunch.exe (%s); X1P42100 may hang or reset\n' "$hash" >&2
 }
 
 append_el2_grub_entries() {
@@ -536,6 +557,7 @@ main() {
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		need mcopy
 		need grub-mkstandalone
+		need sha256sum
 	fi
 
 	if [[ "$WORK_DIR" == "$DEFAULT_WORK_DIR" ]]; then
@@ -584,6 +606,7 @@ main() {
 	if [[ -n "$EL2_DTB_FILE" ]]; then
 		[[ -f "$EL2_DTB_FILE" ]] || die "EL2 DTB not found: $EL2_DTB_FILE"
 		[[ -n "$EFI_IMAGE" ]] || die "--efi-image is required with --el2-dtb (it supplies the Secure Launch bridge)"
+		verify_efi_tcb "$EFI_IMAGE"
 	fi
 
 	mkdir -p "$OUTPUT_DIR" "$WORK_DIR"

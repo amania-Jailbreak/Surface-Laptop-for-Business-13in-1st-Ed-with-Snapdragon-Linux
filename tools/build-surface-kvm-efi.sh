@@ -7,8 +7,11 @@ BASE_EFI=${BASE_EFI:-$ROOT_DIR/build/surface-normal-efi.img}
 TCBLAUNCH=${TCBLAUNCH:-$ROOT_DIR/attachments/tcblaunch.exe}
 SLBOUNCE_EFI=${SLBOUNCE_EFI:-$ROOT_DIR/build/slbounceaa64.efi}
 SLBOUNCE_SOURCE=${SLBOUNCE_SOURCE:-}
+SLBOUNCE_PATCH=${SLBOUNCE_PATCH:-$ROOT_DIR/tools/slbounce-x1p42100-safe-ebs.patch}
 QEBSPIL_EFI=${QEBSPIL_EFI:-}
 QEBSPIL_SOURCE=${QEBSPIL_SOURCE:-}
+LOAD_QEBSPIL=${LOAD_QEBSPIL:-0}
+ALLOW_UNTESTED_TCB=${ALLOW_UNTESTED_TCB:-0}
 FIRMWARE_TREE=${FIRMWARE_TREE:-}
 EL2_DTB=${EL2_DTB:-}
 SHELL_EFI=${SHELL_EFI:-}
@@ -16,6 +19,14 @@ GNUEFI_DIR=${GNUEFI_DIR:-}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/kvm-efi}
 IMAGE_SIZE=${IMAGE_SIZE:-32M}
 CROSS_COMPILE=${CROSS_COMPILE:-aarch64-linux-gnu-}
+
+# This is the TCB build validated on the X1P42100 Surface platform.  Newer
+# Windows builds have removed the error-return path used by slbounce and can
+# leave the machine hung after the Secure Launch handoff.  Keep accepting an
+# explicit override for other Qualcomm platforms, but never select an
+# unverified TCB accidentally for this target.
+KNOWN_GOOD_TCB_VERSION=10.0.26100.1742
+KNOWN_GOOD_TCB_SHA256=5dfcd0253b6ee99499ab33cac221e8a9cea47f3fdf6d4e11de9a9f3c4770d03d
 
 EXTRACT_DIR=
 
@@ -54,9 +65,13 @@ Options:
   --output FILE         Output FAT EFI image (default: build/surface-kvm-efi.img).
   --tcb FILE            Microsoft tcblaunch.exe to place at the FAT root.
   --slbounce FILE       Prebuilt slbounceaa64.efi.
-  --slbounce-source DIR Build slbounce from this source tree when needed.
-  --qebspil FILE        Optional prebuilt qebspilaa64.efi.
+  --slbounce-source DIR Build slbounce from this source tree, automatically
+                        applying the X1P42100 safe ExitBootServices patch.
+  --slbounce-patch FILE Override the X1P42100 slbounce patch.
+  --qebspil FILE        Package an optional prebuilt qebspilaa64.efi.
   --qebspil-source DIR Build optional qebspil from this source tree when needed.
+  --load-qebspil        Start qebspil before Secure Launch (experimental).
+  --allow-untested-tcb  Permit a TCB other than the X1P42100 validated build.
   --firmware-tree DIR   Optional firmware tree copied below /firmware.
   --el2-dtb FILE        Copy an EL2 DTB and build a chainloadable KVM launcher.
   --shell FILE          Add an AArch64 UEFI Shell and startup.nsh KVM path.
@@ -86,11 +101,20 @@ parse_args() {
 			--slbounce-source)
 				shift; (($#)) || die "--slbounce-source needs a directory"; SLBOUNCE_SOURCE=$1
 				;;
+			--slbounce-patch)
+				shift; (($#)) || die "--slbounce-patch needs a file"; SLBOUNCE_PATCH=$1
+				;;
 			--qebspil)
 				shift; (($#)) || die "--qebspil needs a file"; QEBSPIL_EFI=$1
 				;;
 			--qebspil-source)
 				shift; (($#)) || die "--qebspil-source needs a directory"; QEBSPIL_SOURCE=$1
+				;;
+			--load-qebspil)
+				LOAD_QEBSPIL=1
+				;;
+			--allow-untested-tcb)
+				ALLOW_UNTESTED_TCB=1
 				;;
 			--firmware-tree)
 				shift; (($#)) || die "--firmware-tree needs a directory"; FIRMWARE_TREE=$1
@@ -127,16 +151,39 @@ trap cleanup EXIT
 
 build_slbounce_if_needed() {
 	if [[ -n "$SLBOUNCE_SOURCE" ]]; then
+		local patched_source
 		SLBOUNCE_SOURCE=$(absolute_path "$SLBOUNCE_SOURCE")
+		SLBOUNCE_PATCH=$(absolute_path "$SLBOUNCE_PATCH")
 		[[ -d "$SLBOUNCE_SOURCE" ]] || die "slbounce source directory not found: $SLBOUNCE_SOURCE"
-		if [[ ! -f "$SLBOUNCE_EFI" ]]; then
-			log "Building slbounce"
-			make -C "$SLBOUNCE_SOURCE" CROSS_COMPILE="$CROSS_COMPILE" ARCH=aarch64 all
-			SLBOUNCE_EFI="$SLBOUNCE_SOURCE/out/slbounce.efi"
+		[[ -f "$SLBOUNCE_PATCH" ]] || die "slbounce X1P42100 patch not found: $SLBOUNCE_PATCH"
+		patched_source="$WORK_DIR/slbounce-x1p42100"
+		rm -rf -- "$patched_source"
+		mkdir -p "$patched_source"
+		cp -a "$SLBOUNCE_SOURCE/." "$patched_source/"
+
+		log "Applying X1P42100 safe ExitBootServices fix to slbounce"
+		if patch --dry-run --forward --batch -s -d "$patched_source" -p1 <"$SLBOUNCE_PATCH" >/dev/null 2>&1; then
+			patch --forward --batch -s -d "$patched_source" -p1 <"$SLBOUNCE_PATCH"
+		elif patch --dry-run --reverse --batch -s -d "$patched_source" -p1 <"$SLBOUNCE_PATCH" >/dev/null 2>&1; then
+			log "slbounce source already contains the X1P42100 fix"
+		else
+			die "slbounce patch does not apply cleanly to $SLBOUNCE_SOURCE"
+		fi
+
+		# Never let an old build/slbounceaa64.efi silently win over an explicit
+		# source tree.  That previously made source fixes appear to have no effect.
+		rm -rf -- "$patched_source/out"
+		log "Building X1P42100-safe slbounce"
+		make -C "$patched_source" CROSS_COMPILE="$CROSS_COMPILE" ARCH=aarch64 DEBUG=1 all
+		SLBOUNCE_EFI="$patched_source/out/slbounce.efi"
+		if [[ -z "$GNUEFI_DIR" ]]; then
+			GNUEFI_DIR="$patched_source/external/gnu-efi"
 		fi
 	fi
 	SLBOUNCE_EFI=$(absolute_path "$SLBOUNCE_EFI")
 	[[ -f "$SLBOUNCE_EFI" ]] || die "slbounce EFI binary not found: $SLBOUNCE_EFI"
+	strings -el "$SLBOUNCE_EFI" | grep -Fq 'surface-x1p: safe ExitBootServices cache mode' ||
+		die "slbounce is not X1P42100-safe (build it with --slbounce-source)"
 }
 
 build_qebspil_if_needed() {
@@ -153,6 +200,20 @@ build_qebspil_if_needed() {
 		QEBSPIL_EFI=$(absolute_path "$QEBSPIL_EFI")
 		[[ -f "$QEBSPIL_EFI" ]] || die "qebspil EFI binary not found: $QEBSPIL_EFI"
 	fi
+}
+
+check_tcb() {
+	local hash
+	hash=$(sha256sum "$TCBLAUNCH" | cut -d ' ' -f1)
+	if [[ "$hash" == "$KNOWN_GOOD_TCB_SHA256" ]]; then
+		printf 'TCB: %s (%s, validated X1P42100 build)\n' "$TCBLAUNCH" "$KNOWN_GOOD_TCB_VERSION"
+		return 0
+	fi
+
+	if [[ "$ALLOW_UNTESTED_TCB" -ne 1 ]]; then
+		die "unvalidated tcblaunch.exe ($hash); use Windows 11 ARM64 24H2 build $KNOWN_GOOD_TCB_VERSION with SHA256 $KNOWN_GOOD_TCB_SHA256, or pass --allow-untested-tcb for another platform"
+	fi
+	printf 'WARNING: using unvalidated tcblaunch.exe (%s); X1P42100 may hang or reset\n' "$hash" >&2
 }
 
 build_loader_variant() {
@@ -185,7 +246,7 @@ build_loader_variant() {
 		-fpic -fshort-wchar -fno-stack-protector -ffreestanding
 		-DCONFIG_aarch64 -D__MAKEWITH_GNUEFI -DGNU_EFI_USE_MS_ABI
 	)
-	if [[ -n "$QEBSPIL_EFI" ]]; then
+	if [[ "$LOAD_QEBSPIL" -eq 1 ]]; then
 		cflags+=(-DSURFACE_KVM_LOAD_QEBSPIL)
 	fi
 	if [[ -n "$dtb_define" ]]; then
@@ -299,6 +360,9 @@ main() {
 	need truncate
 	need find
 	need sort
+	need patch
+	need strings
+	need sha256sum
 
 	BASE_EFI=$(absolute_path "$BASE_EFI")
 	OUTPUT=$(absolute_path "$OUTPUT")
@@ -314,9 +378,15 @@ main() {
 	fi
 	[[ -f "$BASE_EFI" ]] || die "base EFI image not found: $BASE_EFI"
 	[[ -f "$TCBLAUNCH" ]] || die "tcblaunch.exe not found: $TCBLAUNCH"
+	check_tcb
 
 	build_slbounce_if_needed
 	build_qebspil_if_needed
+	case "$LOAD_QEBSPIL" in
+		0) ;;
+		1) [[ -n "$QEBSPIL_EFI" ]] || die "--load-qebspil requires --qebspil or --qebspil-source" ;;
+		*) die "LOAD_QEBSPIL must be 0 or 1" ;;
+	esac
 	local loader_efi
 	loader_efi=$(build_loader | tail -n 1)
 	[[ -f "$loader_efi" ]] || die "EFI launcher was not built: $loader_efi"

@@ -267,10 +267,15 @@ build_dtb() {
 	dtc -@ -I dts -O dtb -o "$bluetooth_overlay" "$PUBLIC_DIR/device-tree/overlays/bluetooth.dtso" >"$DTB_OUT/bluetooth-dtc.log" 2>&1
 	dtc -@ -I dts -O dtb -o "$fingerprint_overlay" "$PUBLIC_DIR/device-tree/overlays/fingerprint-usb.dtso" >"$DTB_OUT/fingerprint-dtc.log" 2>&1
 	fdtoverlay -i "$raw_base_dtb" -o "$base_dtb" "$touchscreen_overlay"
-	fdtoverlay -i "$base_dtb" -o "$el2_dtb" "$el2_overlay"
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
 	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
+	# Keep the KVM tree identical to the fully enabled normal-boot tree and
+	# apply only the upstream X1 EL2 deltas on top.  Building EL2 directly from
+	# the baseline silently dropped the Bluetooth UART and fingerprint USB host
+	# that are present in the installed/ready entry, making EL1/EL2 comparison
+	# unnecessarily ambiguous.
+	fdtoverlay -i "$bluetooth_fingerprint_dtb" -o "$el2_dtb" "$el2_overlay"
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
@@ -283,7 +288,9 @@ build_dtb() {
 		"/soc@0/ufshc@1d84000 status okay" \
 		"/soc@0/phy@1d80000 status okay" \
 		"/soc@0/gpu@3d00000/zap-shader status disabled" \
+		"/soc@0/video-codec@aa00000 status disabled" \
 		"/soc@0/iommu@15400000 status okay" \
+		"/soc@0/watchdog@17410000 status okay" \
 		"/soc@0/watchdog@1c840000 status disabled"; do
 		set -- $property
 		[[ "$(fdtget "$el2_dtb" "$1" "$2")" == "$3" ]] || die "EL2 DTB property is not $3: $1 $2"
@@ -291,6 +298,15 @@ build_dtb() {
 	[[ "$(fdtget "$el2_dtb" /chosen dtbhack-el2-overlay)" == x1p42100-el2 ]] || die "EL2 DTB marker is missing"
 	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a600000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 0 is not host"
 	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a800000 dr_mode)" == host ]] || die "EL2 DTB USB-C port 1 is not host"
+	[[ "$(fdtget "$el2_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "EL2 DTB dropped the Bluetooth UART"
+	[[ "$(fdtget "$el2_dtb" /soc@0/usb@a200000 status)" == okay ]] || die "EL2 DTB dropped the fingerprint USB controller"
+	[[ "$(fdtget "$el2_dtb" /soc@0/phy@88e0000 status)" == okay ]] || die "EL2 DTB dropped the fingerprint USB PHY"
+	for controller in /soc@0/pcie@1bd0000 /soc@0/pci@1bf8000 /soc@0/pci@1c00000 /soc@0/pci@1c08000; do
+		fdtget "$el2_dtb" "$controller" iommu-map >/dev/null || die "EL2 DTB lacks PCIe iommu-map: $controller"
+	done
+	for controller in /soc@0/pcie@1bd0000 /soc@0/pci@1c00000; do
+		fdtget "$el2_dtb" "$controller" msi-map >/dev/null || die "EL2 DTB lacks PCIe msi-map: $controller"
+	done
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth compatible is unexpected"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth max-speed)" == 3200000 ]] || die "Bluetooth UART speed is unexpected"

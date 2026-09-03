@@ -1,0 +1,46 @@
+#!/bin/sh
+
+# Installed-system GRUB entries for the Surface Laptop for Business 13.
+#
+# The EL2 entry must chainload the Secure Launch bridge.  A direct linux entry
+# with id_aa64mmfr0.ecv=1 is not an EL2 boot: it bypasses slbounce and merely
+# asks an EL1 kernel to expose KVM.  Keep that misleading path out of the
+# installed menu.
+cat <<'GRUB_ENTRY'
+menuentry 'Proxmox VE - Surface Laptop 13 (FUSE/PVE ready)' --id surface-el1-ready --class debian --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod ext2
+    search --no-floppy --fs-uuid --set=root f621d247-7647-4244-aad3-1fffe95afe92
+    linux /boot/vmlinuz-7.2.0-rc5-surface-laptop-13 root=UUID=f621d247-7647-4244-aad3-1fffe95afe92 rootfstype=ext4 rootwait rw
+    devicetree /boot/surface-laptop-13.dtb
+    initrd /boot/initrd.img-7.2.0-rc5-surface-laptop-13
+}
+menuentry 'Proxmox VE - Surface Laptop 13 (pre-FUSE recovery)' --id surface-el1-recovery --class debian --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod ext2
+    search --no-floppy --fs-uuid --set=root f621d247-7647-4244-aad3-1fffe95afe92
+    linux /boot/vmlinuz-7.2.0-rc5-surface-laptop-13.pre-fuse-20260901 root=UUID=f621d247-7647-4244-aad3-1fffe95afe92 rootfstype=ext4 rootwait rw
+    devicetree /boot/surface-laptop-13.dtb.pre-fuse-20260901
+    initrd /boot/initrd.img-7.2.0-rc5-surface-laptop-13.pre-fuse-20260901
+}
+menuentry 'Proxmox VE - Surface Laptop 13 (EL2/KVM; fallback to ready)' --id surface-el2-kvm --class debian --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod fat
+    insmod chain
+    search --no-floppy --fs-uuid --set=esp 584B-B4D4
+    set next_entry=surface-el1-ready
+    save_env next_entry
+    chainloader ($esp)/EFI/BOOT/surface-kvm-entry.efi
+    boot
+}
+menuentry 'Proxmox VE - Surface Laptop 13 (EL2/KVM via EFI Shell)' --id surface-el2-kvm-shell --class debian --class gnu-linux --class gnu --class os {
+    insmod part_gpt
+    insmod fat
+    insmod chain
+    search --no-floppy --fs-uuid --set=esp 584B-B4D4
+    set next_entry=surface-el1-ready
+    save_env next_entry
+    chainloader ($esp)/EFI/BOOT/surface-kvm-shell.efi
+    boot
+}
+GRUB_ENTRY

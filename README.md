@@ -70,6 +70,20 @@ explicit EL2/KVM GRUB entry may chainload `surface-kvm-entry.efi`; putting the
 Secure Launch launcher in the default `BOOTAA64.EFI` path causes the hook to be
 installed twice and can hang at `Loading initial ramdisk`.
 
+For this X1P42100 firmware, use the validated Windows 11 ARM64 24H2
+`tcblaunch.exe` build 10.0.26100.1742 (887432 bytes,
+SHA-256 `5dfcd0253b6ee99499ab33cac221e8a9cea47f3fdf6d4e11de9a9f3c4770d03d`).
+The builder rejects other TCBs by default because several newer builds remove
+the error-return path and can hang or reset this machine. Other Qualcomm
+platforms may opt in explicitly with `--allow-untested-tcb`.
+
+On X1P42100, upstream slbounce's global cache sweep can reset the machine inside
+`ExitBootServices`, before Secure Launch authentication. Passing
+`--slbounce-source` builds a private source copy with
+`tools/slbounce-x1p42100-safe-ebs.patch`; it also fixes the unsafe handling of an
+`EFI_BUFFER_TOO_SMALL` memory-map response. The EL2 entries retain
+`id_aa64mmfr0.ecv=1`, which is required before starting KVM guests on X1P42100.
+
 Build the EFI launcher from a normal Proxmox EFI image and add the optional
 EL2 entry to a patched installer ISO as follows:
 
@@ -84,7 +98,7 @@ export SURFACE_WORK_DIR=build/.work
 ./tools/build-surface-kvm-efi.sh \
   --base-efi build/surface-normal-efi.img \
   --output build/surface-kvm-efi.img \
-  --tcb attachments/tcblaunch.exe \
+  --tcb /path/to/tcblaunch-10.0.26100.1742.exe \
   --slbounce-source /path/to/slbounce \
   --el2-dtb build/.work/dtb/surface-laptop-13-el2.dtb
 
@@ -98,13 +112,20 @@ GRUB_MODULE_DIR=/usr/lib/grub/arm64-efi \
   --efi-image build/surface-kvm-efi.img
 ```
 
-`--qebspil`/`--qebspil-source` can add the optional Qualcomm DSP pre-boot
+`--qebspil`/`--qebspil-source` can package the optional Qualcomm DSP pre-boot
 loader, and `--firmware-tree` copies an additional firmware tree into the EFI
-image. The normal EL1 DTB remains separate so non-KVM boots and hardware
+image. It is not started by default: use `--load-qebspil` only after validating
+the basic EL2 path on the target device. The normal EL1 DTB remains separate so non-KVM boots and hardware
 variants can continue to use their own menu entries. The ISO KVM entries
 chainload a Secure Launch bridge on the ISO filesystem, then boot the selected
 EL2 DTB and installer initramfs; they do not rely on a writable GRUB
 environment.
+
+For an installed system, use `tools/installed-grub-surface-laptop-13` as the
+custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
+the Secure Launch handoff, so an early reset falls back to Ready. Install
+`tools/surface-kvm-clear-fallback.sh` and its systemd unit as well; a successful
+EL2 boot clears the one-shot fallback after networking is up.
 
 
 ## Using on your own install

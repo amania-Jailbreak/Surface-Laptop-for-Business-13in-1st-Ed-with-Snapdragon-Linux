@@ -1,0 +1,79 @@
+diff --git a/src/bounce_main.c b/src/bounce_main.c
+index 944db09..1e5df52 100644
+--- a/src/bounce_main.c
++++ b/src/bounce_main.c
+@@ -82,11 +82,17 @@ EFI_STATUS sl_GetMemoryMap(UINTN *MemoryMapSize, EFI_MEMORY_DESCRIPTOR *MemoryMa
+ 	EFI_STATUS status = uefi_call_wrapper(real_GetMemoryMap, 5,
+ 			MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
+ 
+-	if (MemoryMapSize)
++	/*
++	 * EFI_BUFFER_TOO_SMALL reports the required size, not the size of the
++	 * caller's buffer.  Remembering that value together with a NULL or short
++	 * buffer makes the ExitBootServices hook walk beyond valid memory.
++	 */
++	if (!EFI_ERROR(status) && MemoryMap && MemoryMapSize && DescriptorSize &&
++	    *DescriptorSize) {
+ 		LastMemoryMapSize = *MemoryMapSize;
+-	if (DescriptorSize)
+ 		LastDescriptorSize = *DescriptorSize;
+-	LastMemoryMap = MemoryMap;
++		LastMemoryMap = MemoryMap;
++	}
+ 
+ 	return status;
+ }
+@@ -99,40 +105,13 @@ EFI_STATUS sl_ExitBootServices(EFI_HANDLE ImageHandle, UINTN MapKey)
+ 		return uefi_call_wrapper(real_ExitBootServices, 2, ImageHandle, MapKey);
+ 
+ 	/*
+-	 * Unfortunately switching to EL2 will corrupt the caches and
+-	 * the memory will be gone if it was not flushed to ram. Since
+-	 * the OS loaders generally assume EBS won't break caches, we
+-	 * have to flush and invalidate everything to make sure loader
+-	 * doesn't break.
+-	 *
+-	 * We can't possibly know which memory was touched by the loader
+-	 * so we just flush everything that was allocated here. This
+-	 * is suboptimal but would hopefully make sure we don't crash.
+-	 *
+-	 * Note that if we try to flush caches on hyp-owned memory, we
+-	 * will also crash. Thus we perform AUTH command after we flushed
+-	 * all the cache.
++	 * Do not sweep every Loader/BootServices memory-map range here.  On
++	 * X1P42100 firmware a dc civac over an ordinary EfiBootServicesData
++	 * range causes a fatal reset before SL_CMD_AUTH.  The Secure Launch
++	 * buffers are flushed individually by sl_create_data(), and the
++	 * transition save area is flushed immediately before SL_CMD_LAUNCH.
+ 	 */
+ 
+-	EFI_MEMORY_DESCRIPTOR *MemoryEntry;
+-	for (int i = 0; i < LastMemoryMapSize / LastDescriptorSize; ++i) {
+-		MemoryEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT8*)LastMemoryMap + LastDescriptorSize * i);
+-		uint64_t start = MemoryEntry->PhysicalStart;
+-		uint64_t size  = MemoryEntry->NumberOfPages * 4096;
+-
+-		switch (MemoryEntry->Type) {
+-		case EfiLoaderCode:
+-		case EfiLoaderData:
+-		case EfiBootServicesCode:
+-		case EfiBootServicesData:
+-		case EfiRuntimeServicesCode:
+-		case EfiRuntimeServicesData:
+-		case EfiACPIReclaimMemory:
+-			clear_dcache_range(start, size);
+-			break;
+-		}
+-	}
+-
+ 	EFI_STATUS status = uefi_call_wrapper(real_ExitBootServices, 2, ImageHandle, MapKey);
+ 	if (EFI_ERROR(status))
+ 		return status;
+@@ -229,6 +208,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
+ 	}
+ 
+ 	Print(L"===[ slbounce ]==================================\n");
++	Print(L" surface-x1p: safe ExitBootServices cache mode\n");
+ 	Print(L" BS->ExitBootServices() was replaced with a hook\n");
+ 	Print(L"  that would perform Secure-Launch right after\n");
+ 	Print(L"exiting UEFI. Your system will crash if SL fails.\n");

@@ -6,9 +6,10 @@ OUTPUT=${OUTPUT:-$ROOT_DIR/build/surface-kvm-grub-installed.efi}
 GRUB_MODULE_DIR=${GRUB_MODULE_DIR:-/usr/lib/grub/arm64-efi}
 ROOT_UUID=${ROOT_UUID:-f621d247-7647-4244-aad3-1fffe95afe92}
 ESP_UUID=${ESP_UUID:-584B-B4D4}
-KERNEL_PATH=${KERNEL_PATH:-/boot/vmlinuz-7.2.0-rc5-surface-laptop-13-kvm}
+KERNEL_PATH=${KERNEL_PATH:-/boot/vmlinuz-7.2.0-rc5-surface-laptop-13}
 DTB_PATH=${DTB_PATH:-/boot/surface-laptop-13-el2.dtb}
-INITRD_PATH=${INITRD_PATH:-/boot/initrd.img-7.2.0-rc5-surface-laptop-13-kvm}
+INITRD_PATH=${INITRD_PATH:-/boot/initrd.img-7.2.0-rc5-surface-laptop-13}
+KERNEL_EXTRA_ARGS=${KERNEL_EXTRA_ARGS-"id_aa64mmfr0.ecv=1 loglevel=7 ignore_loglevel panic=-1"}
 WORK_DIR=${WORK_DIR:-$ROOT_DIR/build/.work/installed-kvm-grub}
 PAYLOAD_MODE=root
 
@@ -47,6 +48,9 @@ Options:
   --kernel PATH       Kernel path as seen by GRUB.
   --dtb PATH          EL2 DTB path as seen by GRUB.
   --initrd PATH       initramfs path as seen by GRUB.
+  --kernel-extra-args ARGS
+                      Additional kernel arguments (default: X1P ECV override,
+                      verbose logging, and no automatic reboot after a panic).
   --payload-from-esp  Load kernel, DTB and initramfs from the ESP's
                       /EFI/BOOT directory selected by --esp-uuid.
   --payload-from-cmdpath
@@ -83,6 +87,9 @@ parse_args() {
 				;;
 			--initrd)
 				shift; (($#)) || die "--initrd needs a path"; INITRD_PATH=$1
+				;;
+			--kernel-extra-args)
+				shift; (($#)) || die "--kernel-extra-args needs a value"; KERNEL_EXTRA_ARGS=$1
 				;;
 			--work)
 				shift; (($#)) || die "--work needs a directory"; WORK_DIR=$1
@@ -129,10 +136,10 @@ main() {
 	cmdpath)
 		cat >"$CONFIG" <<EOF
 set timeout=0
-echo 'surface-kvm: starting installed KVM GRUB'
+echo 'surface-kvm: starting installed KVM GRUB (matched-ready payload v3 + ECV)'
 echo "surface-kvm: cmdpath=\$cmdpath"
 echo 'surface-kvm: loading kernel'
-linux \$cmdpath/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw id_aa64mmfr0.ecv=1
+linux \$cmdpath/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
 echo 'surface-kvm: kernel loaded'
 echo 'surface-kvm: loading EL2 DTB'
 devicetree \$cmdpath/surface-laptop-13-el2.dtb
@@ -147,7 +154,7 @@ EOF
 	esp)
 		cat >"$CONFIG" <<EOF
 set timeout=0
-echo 'surface-kvm: starting installed KVM GRUB'
+echo 'surface-kvm: starting installed KVM GRUB (matched-ready payload v3 + ECV)'
 echo 'surface-kvm: selecting installed ESP'
 insmod part_gpt
 insmod fat
@@ -155,7 +162,7 @@ insmod search_fs_uuid
 search --no-floppy --fs-uuid --set=root $ESP_UUID
 insmod linux
 insmod fdt
-linux /EFI/BOOT/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw id_aa64mmfr0.ecv=1
+linux /EFI/BOOT/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
 devicetree /EFI/BOOT/surface-laptop-13-el2.dtb
 initrd /EFI/BOOT/surface-kvm-initrd.img
 boot
@@ -171,7 +178,7 @@ insmod search_fs_uuid
 insmod linux
 insmod fdt
 search --no-floppy --fs-uuid --set=root $ROOT_UUID
-linux $KERNEL_PATH root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw id_aa64mmfr0.ecv=1
+linux $KERNEL_PATH root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
 devicetree $DTB_PATH
 initrd $INITRD_PATH
 boot

@@ -5,7 +5,7 @@
  * The normal Proxmox shim is kept as shimaa64.efi. The EL2 variant installs
  * the EL2 device tree, then loads slbounce before starting either a standalone
  * installer GRUB or the normal shim. qebspil is optional and is loaded first
- * when this file is built with SURFACE_KVM_LOAD_QEBSPIL.
+ * only when this file is explicitly built with SURFACE_KVM_LOAD_QEBSPIL.
  */
 
 #include <efi.h>
