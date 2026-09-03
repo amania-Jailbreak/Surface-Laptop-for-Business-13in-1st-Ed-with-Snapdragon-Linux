@@ -1,0 +1,105 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] usb: host: xhci-plat: keep Qualcomm host active for s2idle
+
+The Qualcomm DWC3 wrapper can be kept alive by a board-specific device-tree
+property, but the xHCI platform child still runs its normal system-suspend
+callback.  That callback saves the controller and can disconnect a USB-root
+system disk during s2idle.
+
+Honor the property through the parent device chain and skip only the system
+sleep callbacks for s2idle.  Runtime PM remains unchanged, and other boards
+are unaffected because the behavior is opt-in.
+
+---
+ drivers/usb/host/xhci-plat.c | 44 ++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 44 insertions(+)
+
+diff --git a/drivers/usb/host/xhci-plat.c b/drivers/usb/host/xhci-plat.c
+index 000000000000..000000000000 100644
+--- a/drivers/usb/host/xhci-plat.c
++++ b/drivers/usb/host/xhci-plat.c
+@@ -18,6 +18,8 @@
+ #include <linux/usb/of.h>
+ #include <linux/reset.h>
+ #include <linux/usb/xhci-sideband.h>
++#include <linux/property.h>
++#include <linux/suspend.h>
+ 
+ #include "xhci.h"
+ #include "xhci-plat.h"
+@@ -488,6 +490,19 @@ void xhci_plat_remove(struct platform_device *dev)
+ }
+ EXPORT_SYMBOL_GPL(xhci_plat_remove);
+ 
++static bool xhci_plat_keep_host_active(struct device *dev)
++{
++	struct device *parent;
++
++	if (pm_suspend_target_state != PM_SUSPEND_TO_IDLE)
++		return false;
++
++	for (parent = dev->parent; parent; parent = parent->parent) {
++		if (device_property_read_bool(parent, "qcom,keep-host-on-suspend"))
++			return true;
++	}
++
++	return false;
++}
++
+ static int xhci_plat_suspend_common(struct device *dev)
+ {
+ 	struct usb_hcd	*hcd = dev_get_drvdata(dev);
+@@ -522,6 +537,12 @@ static int xhci_plat_suspend(struct device *dev)
+ 	struct usb_hcd	*hcd = dev_get_drvdata(dev);
+ 	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
+ 
++	if (xhci_plat_keep_host_active(dev)) {
++		dev_info_once(dev,
++			      "keeping Qualcomm xHCI active during s2idle\n");
++		return 0;
++	}
++
+ 	if (xhci_sideband_check(hcd)) {
+ 		priv->sideband_at_suspend = 1;
+ 		dev_dbg(dev, "sideband instance active, skip suspend.\n");
+@@ -533,6 +554,9 @@ static int xhci_plat_suspend(struct device *dev)
+ 
+ static int xhci_plat_freeze(struct device *dev)
+ {
++	if (xhci_plat_keep_host_active(dev))
++		return 0;
++
+ 	return xhci_plat_suspend_common(dev);
+ }
+ 
+@@ -577,6 +601,9 @@ static int xhci_plat_resume(struct device *dev)
+ 	struct usb_hcd	*hcd = dev_get_drvdata(dev);
+ 	struct xhci_plat_priv *priv = hcd_to_xhci_priv(hcd);
+ 
++	if (xhci_plat_keep_host_active(dev))
++		return 0;
++
+ 	if (priv->sideband_at_suspend) {
+ 		priv->sideband_at_suspend = 0;
+ 		dev_dbg(dev, "sideband instance active, skip resume.\n");
+@@ -588,16 +615,33 @@ static int xhci_plat_resume(struct device *dev)
+ 
+ static int xhci_plat_thaw(struct device *dev)
+ {
++	if (xhci_plat_keep_host_active(dev))
++		return 0;
++
+ 	return xhci_plat_resume_common(dev, false);
+ }
+ 
+ static int xhci_plat_restore(struct device *dev)
+ {
++	if (xhci_plat_keep_host_active(dev))
++		return 0;
++
+ 	return xhci_plat_resume_common(dev, true);
+ }
+ 
+ static int __maybe_unused xhci_plat_runtime_suspend(struct device *dev)
+-- 
+2.50.1

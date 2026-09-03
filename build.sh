@@ -166,6 +166,7 @@ patch_features_present() {
 		;;
 		0003-*) grep -q '0x07ad' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/panel/panel-edp.c" ;;
 		0004-*) grep -q 'qcom,keep-host-on-suspend' "$KERNEL_WORK_SOURCE/drivers/usb/dwc3/dwc3-qcom.c" ;;
+		0005-*) grep -q 'xhci_plat_keep_host_active' "$KERNEL_WORK_SOURCE/drivers/usb/host/xhci-plat.c" ;;
 		*) return 1 ;;
 	esac
 }
