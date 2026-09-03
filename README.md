@@ -82,7 +82,10 @@ On X1P42100, upstream slbounce's global cache sweep can reset the machine inside
 `--slbounce-source` builds a private source copy with
 `tools/slbounce-x1p42100-safe-ebs.patch`; it also fixes the unsafe handling of an
 `EFI_BUFFER_TOO_SMALL` memory-map response. The EL2 entries retain
-`id_aa64mmfr0.ecv=1`, which is required before starting KVM guests on X1P42100.
+`clk_ignore_unused pd_ignore_unused` so Linux does not turn off resources still
+owned by the platform firmware, and `id_aa64mmfr0.ecv=1`, which is required
+before starting KVM guests on X1P42100. Omitting the clock/power-domain
+arguments can reset the machine before the first userspace message.
 
 Build the EFI launcher from a normal Proxmox EFI image and add the optional
 EL2 entry to a patched installer ISO as follows:
@@ -119,7 +122,8 @@ the basic EL2 path on the target device. The normal EL1 DTB remains separate so 
 variants can continue to use their own menu entries. The ISO KVM entries
 chainload a Secure Launch bridge on the ISO filesystem, then boot the selected
 EL2 DTB and installer initramfs; they do not rely on a writable GRUB
-environment.
+environment. `build-proxmox-iso.sh` accepts `EL2_KERNEL_ARGS` when a different
+Qualcomm firmware needs a platform-specific EL2 command line.
 
 For an installed system, use `tools/installed-grub-surface-laptop-13` as the
 custom `/etc/grub.d/01_surface-laptop-13`. It arms `surface-el1-ready` before
