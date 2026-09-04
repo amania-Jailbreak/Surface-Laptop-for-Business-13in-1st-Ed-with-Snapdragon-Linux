@@ -25,6 +25,12 @@ BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
 BASE_DTB_INPUT=${BASE_DTB_INPUT:-}
 UKI_STUB=${UKI_STUB:-/usr/lib/systemd/boot/efi/linuxaa64.efi.stub}
 KERNEL_JOBS=${KERNEL_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 4)}
+# Keep the out-of-tree kernel objects by default. Set this to 0 only when a
+# deliberately clean kernel build is required.
+KERNEL_REUSE_OUTPUT=${KERNEL_REUSE_OUTPUT:-1}
+# Public kernel patches are applied by default; set this to 0 only when the
+# supplied source tree already contains every public patch.
+KERNEL_APPLY_PATCHES=${KERNEL_APPLY_PATCHES:-1}
 # Optional OS-specific command line for a local boot test.  Public builds
 # keep the neutral placeholder below when this is unset.
 CMDLINE_INPUT=${SURFACE_CMDLINE_FILE:-}
@@ -149,16 +155,36 @@ check_android_inputs() {
 	done
 }
 
+patch_features_present() {
+	local name="$(basename "$1")"
+	case "$name" in
+		0001-*) grep -q 'qcom,force-host-role' "$KERNEL_WORK_SOURCE/drivers/usb/dwc3/drd.c" ;;
+		0002-*)
+			grep -q 'qcom,force-ucsi-registration' "$KERNEL_WORK_SOURCE/drivers/soc/qcom/pmic_glink.c" &&
+			grep -q 'UCSI registration state' "$KERNEL_WORK_SOURCE/drivers/usb/typec/ucsi/ucsi_glink.c" &&
+			grep -q 'charger PD notification' "$KERNEL_WORK_SOURCE/drivers/usb/typec/ucsi/ucsi_glink.c"
+		;;
+		0003-*) grep -q '0x07ad' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/panel/panel-edp.c" ;;
+		0004-*) grep -q 'qcom,keep-host-on-suspend' "$KERNEL_WORK_SOURCE/drivers/usb/dwc3/dwc3-qcom.c" ;;
+		0005-*) grep -q 'xhci_plat_keep_host_active' "$KERNEL_WORK_SOURCE/drivers/usb/host/xhci-plat.c" ;;
+		0006-*)
+			grep -q 'qcom,keep-edp-active-on-blank' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/msm/dp/dp_display.c" &&
+			grep -q 'keep-panel-prepared-on-disable' "$KERNEL_WORK_SOURCE/drivers/gpu/drm/bridge/panel.c"
+		;;
+		*) return 1 ;;
+	esac
+}
+
 apply_public_patches() {
-	[[ "${KERNEL_APPLY_PATCHES:-0}" == 1 ]] || return 0
+	[[ "${KERNEL_APPLY_PATCHES:-1}" == 1 ]] || return 0
 	need patch
 	local patch_file
 	for patch_file in "$PUBLIC_DIR"/kernel/patches/*.patch; do
 		[[ -f "$patch_file" ]] || continue
-		if patch --dry-run --batch --silent -d "$KERNEL_WORK_SOURCE" -p1 <"$patch_file" >/dev/null 2>&1; then
-			patch --batch --silent -d "$KERNEL_WORK_SOURCE" -p1 <"$patch_file"
-		elif patch --dry-run --batch --silent -R -d "$KERNEL_WORK_SOURCE" -p1 <"$patch_file" >/dev/null 2>&1; then
-			printf 'patch already present: %s\n' "$(basename "$patch_file")"
+		if patch_features_present "$patch_file"; then
+			printf 'patch already present (source feature): %s\n' "$(basename "$patch_file")"
+		elif patch --dry-run --batch --forward --silent -d "$KERNEL_WORK_SOURCE" -p1 <"$patch_file" >/dev/null 2>&1; then
+			patch --batch --forward --silent -d "$KERNEL_WORK_SOURCE" -p1 <"$patch_file"
 		else
 			die "kernel patch does not apply cleanly: $patch_file"
 		fi
@@ -208,7 +234,7 @@ build_kernel() {
 	need make; need aarch64-linux-gnu-gcc
 	[[ -f "$KERNEL_SOURCE/Makefile" ]] || die "kernel source directory not found: $KERNEL_SOURCE"
 	mkdirs
-	if [[ ! -f "$KERNEL_SOURCE/.config" && ! -d "$KERNEL_SOURCE/include/config" && ! -d "$KERNEL_SOURCE/arch/arm64/include/generated" ]]; then
+	if [[ "${KERNEL_IN_PLACE:-0}" == 1 && ! -f "$KERNEL_SOURCE/.config" && ! -d "$KERNEL_SOURCE/include/config" && ! -d "$KERNEL_SOURCE/arch/arm64/include/generated" ]]; then
 		# A clean checkout can be used directly with O=; the kernel build writes
 		# generated files into the separate output directory.
 		KERNEL_WORK_SOURCE="$KERNEL_SOURCE"
@@ -256,19 +282,31 @@ build_kernel() {
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- olddefconfig
 	log "Building ARM64 kernel and modules"
 	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" -j"$KERNEL_JOBS" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- Image modules
-	local krel module_release_dir
+	local krel module_release_dir module_install_stamp
 	krel=$(make -s -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- kernelrelease)
 	case "$krel" in
 		""|*/*|*..*) die "unsafe kernel release: $krel" ;;
 	esac
 	module_release_dir="$MODULE_OUT/lib/modules/$krel"
-	if [[ -e "$module_release_dir" ]]; then
-		[[ -d "$module_release_dir" && ! -L "$module_release_dir" ]] \
-			|| die "unsafe module output directory: $module_release_dir"
-		find "$module_release_dir" -depth -mindepth 1 -delete
-		rmdir "$module_release_dir"
+	module_install_stamp="$MODULE_OUT/.modules-installed-$krel"
+	local install_modules=1
+	if [[ "${KERNEL_FORCE_MODULE_INSTALL:-0}" != 1 && -f "$module_install_stamp" ]]; then
+		if [[ -z "$(find "$KERNEL_OUT" -type f \( -name '*.ko' -o -name 'modules.order' -o -name 'modules.builtin' -o -name 'modules.builtin.modinfo' \) -newer "$module_install_stamp" -print -quit)" ]]; then
+			install_modules=0
+		fi
 	fi
-	make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="$MODULE_OUT" modules_install
+	if (( install_modules )); then
+		if [[ -e "$module_release_dir" ]]; then
+			[[ -d "$module_release_dir" && ! -L "$module_release_dir" ]] \
+				|| die "unsafe module output directory: $module_release_dir"
+			find "$module_release_dir" -depth -mindepth 1 -delete
+			rmdir "$module_release_dir"
+		fi
+		make -C "$KERNEL_WORK_SOURCE" O="$KERNEL_OUT" ARCH=arm64 CROSS_COMPILE=aarch64-linux-gnu- INSTALL_MOD_PATH="$MODULE_OUT" modules_install
+		touch "$module_install_stamp"
+	else
+		log "Reusing installed kernel modules"
+	fi
 	cp "$KERNEL_OUT/arch/arm64/boot/Image" "$kernel_image"
 	cp "$KERNEL_OUT/.config" "$kernel_config"
 	check_kernel_features "$kernel_config"
@@ -302,10 +340,16 @@ build_dtb() {
 	fdtoverlay -i "$base_dtb" -o "$bluetooth_dtb" "$bluetooth_overlay"
 	fdtoverlay -i "$base_dtb" -o "$fingerprint_dtb" "$fingerprint_overlay"
 	fdtoverlay -i "$bluetooth_dtb" -o "$bluetooth_fingerprint_dtb" "$fingerprint_overlay"
+	for candidate in "$base_dtb" "$bluetooth_dtb" "$fingerprint_dtb" "$bluetooth_fingerprint_dtb"; do
+		fdtget "$candidate" /soc@0/display-subsystem@ae00000/displayport-controller@aea0000 qcom,keep-edp-active-on-blank >/dev/null 2>&1 || die "eDP blanking guard is missing in $candidate"
+		fdtget "$candidate" /soc@0/display-subsystem@ae00000/displayport-controller@aea0000/aux-bus/panel keep-panel-prepared-on-disable >/dev/null 2>&1 || die "eDP panel preparation guard is missing in $candidate"
+	done
 	for candidate in "$base_dtb" "$bluetooth_dtb"; do
 		[[ -s "$candidate" ]] || die "empty DTB: $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a600000 dr_mode)" == host ]] || die "USB-C port 0 is not host in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/usb@a800000 dr_mode)" == host ]] || die "USB-C port 1 is not host in $candidate"
+		fdtget "$candidate" /soc@0/usb@a600000 qcom,keep-host-on-suspend >/dev/null 2>&1 || die "USB-C port 0 sleep guard is missing in $candidate"
+		fdtget "$candidate" /soc@0/usb@a800000 qcom,keep-host-on-suspend >/dev/null 2>&1 || die "USB-C port 1 sleep guard is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 compatible)" == hid-over-i2c ]] || die "touchscreen node is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "touchscreen HID descriptor address is not zero in $candidate"
@@ -563,7 +607,7 @@ write_sleep_cmdline() {
 	sed -E 's/(^|[[:space:]])mem_sleep_default=[^[:space:]]+//g' "$CMDLINE" \
 		| tr '\n' ' ' \
 		| sed -E 's/[[:space:]]+/ /g; s/[[:space:]]+$//' >"$SLEEP_CMDLINE"
-	printf ' mem_sleep_default=s2idle\n' >>"$SLEEP_CMDLINE"
+	printf ' mem_sleep_default=s2idle usbcore.autosuspend=-1\n' >>"$SLEEP_CMDLINE"
 }
 
 build_sleep() {

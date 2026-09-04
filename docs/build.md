@@ -29,6 +29,19 @@ does not require an ignored binary. Set `BASE_DTB_INPUT` together with
 `REBUILD_BASE_DTB=0` only when comparing against a separately obtained,
 measured DTB.
 
+Kernel output is incremental by default. Keep the same `SURFACE_WORK_DIR`
+for subsequent builds so the out-of-tree objects and generated module tree can
+be reused:
+
+```sh
+./build.sh kernel
+./build.sh sleep
+```
+
+Use `KERNEL_REUSE_OUTPUT=0 ./build.sh kernel` for a deliberate clean build.
+Use `KERNEL_FORCE_MODULE_INSTALL=1 ./build.sh kernel` to force module
+deployment when the installed module tree must be refreshed.
+
 `KERNEL_SOURCE`, `INITRD_BASE` and `FIRMWARE_SOURCE` have no default: the
 full kernel/UKI build fails fast when they are not exported. The DTB-only
 target does not require them and can be run independently with
@@ -59,6 +72,12 @@ sudo packaging/install-s2idle.sh /tmp/surface-laptop-13-build/uki/surface-laptop
 This creates only `surface-laptop-13-s2idle.efi` and a matching boot entry;
 it never replaces `current.efi` or `fallback.efi`. The result still requires
 hardware testing, especially resume of the USB-C system disk.
+
+The sleep test also adds `usbcore.autosuspend=-1` and marks the two Type-C
+host wrappers with `qcom,keep-host-on-suspend`. This keeps the USB-root bridge
+out of runtime autosuspend and leaves the Qualcomm host wrappers active across
+s2idle. It is intentionally a sleep-test policy and is not applied to the
+normal UKIs.
 
 The generated module tree contains the optional CIFS and WireGuard modules in
 addition to the Surface drivers. Install that module tree into the target OS

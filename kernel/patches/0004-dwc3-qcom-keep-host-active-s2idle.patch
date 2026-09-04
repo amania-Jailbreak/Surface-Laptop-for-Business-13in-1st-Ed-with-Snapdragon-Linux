@@ -1,0 +1,82 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+Subject: [PATCH] usb: dwc3: qcom: keep selected host active during system sleep
+
+Some Qualcomm X1 platforms lose a directly attached USB storage bridge when
+the DWC3 host wrapper is suspended for s2idle. A system whose root filesystem
+is on that bridge cannot recover in userspace after the link disappears.
+
+Allow board device trees to keep a host-mode Qualcomm DWC3 wrapper active
+during system sleep. Runtime PM remains unchanged; this is deliberately
+opt-in per controller and is intended for boards whose root disk is USB.
+
+---
+ drivers/usb/dwc3/dwc3-qcom.c | 28 ++++++++++++++++++++++++++++
+ 1 file changed, 28 insertions(+)
+
+diff --git a/drivers/usb/dwc3/dwc3-qcom.c b/drivers/usb/dwc3/dwc3-qcom.c
+--- a/drivers/usb/dwc3/dwc3-qcom.c
++++ b/drivers/usb/dwc3/dwc3-qcom.c
+@@ -8,6 +8,7 @@
+ #include <linux/irq.h>
+ #include <linux/of_clk.h>
+ #include <linux/module.h>
++#include <linux/property.h>
+ #include <linux/kernel.h>
+ #include <linux/interconnect.h>
+ #include <linux/platform_device.h>
+@@ -228,6 +229,14 @@ static bool dwc3_qcom_is_host(struct dwc3_qcom *qcom)
+ 	return qcom->dwc.xhci;
+ }
+ 
++/* Some boards keep their root disk behind this host during s2idle. */
++static bool dwc3_qcom_keep_host_active(struct dwc3_qcom *qcom)
++{
++	return dwc3_qcom_is_host(qcom) &&
++		device_property_read_bool(qcom->dev,
++					  "qcom,keep-host-on-suspend");
++}
++
+ static enum usb_device_speed dwc3_qcom_read_usb2_speed(struct dwc3_qcom *qcom, int port_index)
+ {
+ 	struct usb_device *udev;
+@@ -751,6 +760,12 @@ static int dwc3_qcom_pm_suspend(struct device *dev)
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
++	if (dwc3_qcom_keep_host_active(qcom)) {
++		dev_info_once(dev,
++			      "keeping host controller active during system suspend\n");
++		return 0;
++	}
++
+ 	ret = dwc3_pm_suspend(&qcom->dwc);
+ 	if (ret)
+ 		return ret;
+@@ -771,6 +786,9 @@ static int dwc3_qcom_pm_resume(struct device *dev)
+ 	bool wakeup = device_may_wakeup(dev);
+ 	int ret;
+ 
++	if (dwc3_qcom_keep_host_active(qcom))
++		return 0;
++
+ 	ret = dwc3_qcom_resume(qcom, wakeup);
+ 	if (ret)
+ 		return ret;
+@@ -792,4 +810,7 @@ static void dwc3_qcom_complete(struct device *dev)
+ 	struct dwc3 *dwc = dev_get_drvdata(dev);
+ 
++	if (dwc3_qcom_keep_host_active(to_dwc3_qcom(dwc)))
++		return;
++
+ 	dwc3_pm_complete(dwc);
+ }
+@@ -800,4 +821,7 @@ static int dwc3_qcom_prepare(struct device *dev)
+ 	struct dwc3 *dwc = dev_get_drvdata(dev);
+ 
++	if (dwc3_qcom_keep_host_active(to_dwc3_qcom(dwc)))
++		return 0;
++
+ 	return dwc3_pm_prepare(dwc);
+ }
+-- 
+2.50.1

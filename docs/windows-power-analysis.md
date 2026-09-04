@@ -130,3 +130,30 @@ the USB-C system disk remains available while the display can still turn off.
 
 This is a bring-up workaround, not proof that deep suspend is safe. Deep sleep
 must remain a separate test after a reliable non-USB root boot path exists.
+## Display-off path
+
+The panel in the tested machine identifies as `Monitor\\LGD07AD`. The matching
+Surface panel package installs a UMDF lower filter, while `ACPI\\MSHW0380` is
+handled by Surface Display Hardware Driver with Windows Directed Fx enabled.
+The extracted binaries contain separate `DISPLAY OFF` and `DISPLAY ON`
+handlers, flush display initialization work on monitor-off, and expose a PSR
+control command. Qualcomm's display package also carries eDP power-timing and
+PMIC PWM parameters, including PWM glitch removal.
+
+This differs from the unmodified Linux DRM disable path, which disables the
+backlight, unprepares the panel, pushes an idle pattern, tears down the eDP
+link and PHY, and drops runtime-PM references. On this machine that full path
+causes an immediate hardware reset when the desktop turns the display off.
+
+The Surface DT therefore opts into an experimental conservative blanking path:
+
+- the backlight is disabled normally;
+- the panel remains prepared;
+- the eDP controller and PHY retain their runtime-PM references;
+- PSR is used when advertised by the panel, otherwise only the stream is
+  idled and restarted;
+- re-enable does not acquire duplicate runtime-PM references.
+
+The policy is scoped by `qcom,keep-edp-active-on-blank` and
+`keep-panel-prepared-on-disable`; other boards retain the upstream behavior.
+It intentionally favors display-off stability over maximum idle power saving.
