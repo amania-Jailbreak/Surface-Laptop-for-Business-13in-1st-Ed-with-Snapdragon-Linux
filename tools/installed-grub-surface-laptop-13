@@ -33,14 +33,4 @@ menuentry 'Proxmox VE - Surface Laptop 13 (EL2/KVM; fallback to ready)' --id sur
     chainloader ($esp)/EFI/BOOT/surface-kvm-entry.efi
     boot
 }
-menuentry 'Proxmox VE - Surface Laptop 13 (EL2/KVM via EFI Shell)' --id surface-el2-kvm-shell --class debian --class gnu-linux --class gnu --class os {
-    insmod part_gpt
-    insmod fat
-    insmod chain
-    search --no-floppy --fs-uuid --set=esp 584B-B4D4
-    set next_entry=surface-el1-ready
-    save_env next_entry
-    chainloader ($esp)/EFI/BOOT/surface-kvm-shell.efi
-    boot
-}
 GRUB_ENTRY

@@ -1,8 +1,6 @@
-diff --git a/src/bounce_main.c b/src/bounce_main.c
-index 944db09..1e5df52 100644
 --- a/src/bounce_main.c
 +++ b/src/bounce_main.c
-@@ -82,11 +82,17 @@ EFI_STATUS sl_GetMemoryMap(UINTN *MemoryMapSize, EFI_MEMORY_DESCRIPTOR *MemoryMa
+@@ -82,11 +82,17 @@
  	EFI_STATUS status = uefi_call_wrapper(real_GetMemoryMap, 5,
  			MemoryMapSize, MemoryMap, MapKey, DescriptorSize, DescriptorVersion);
  
@@ -23,7 +21,7 @@ index 944db09..1e5df52 100644
  
  	return status;
  }
-@@ -99,40 +105,13 @@ EFI_STATUS sl_ExitBootServices(EFI_HANDLE ImageHandle, UINTN MapKey)
+@@ -99,37 +105,34 @@
  		return uefi_call_wrapper(real_ExitBootServices, 2, ImageHandle, MapKey);
  
  	/*
@@ -40,14 +38,16 @@ index 944db09..1e5df52 100644
 -	 * Note that if we try to flush caches on hyp-owned memory, we
 -	 * will also crash. Thus we perform AUTH command after we flushed
 -	 * all the cache.
-+	 * Do not sweep every Loader/BootServices memory-map range here.  On
-+	 * X1P42100 firmware a dc civac over an ordinary EfiBootServicesData
-+	 * range causes a fatal reset before SL_CMD_AUTH.  The Secure Launch
-+	 * buffers are flushed individually by sl_create_data(), and the
-+	 * transition save area is flushed immediately before SL_CMD_LAUNCH.
++	 * X1P42100 firmware resets when dc civac is issued for some ordinary
++	 * EfiBootServicesData ranges.  The upstream all-types sweep therefore
++	 * cannot be used here.  The OS loader itself is still required to have
++	 * its instruction/data ranges made visible before Secure Launch changes
++	 * the execution context.  slbounce is itself a runtime EFI driver, so
++	 * include runtime code/data as well.  In particular, do not touch
++	 * BootServicesCode/Data or ACPI ranges.
  	 */
  
--	EFI_MEMORY_DESCRIPTOR *MemoryEntry;
+ 	EFI_MEMORY_DESCRIPTOR *MemoryEntry;
 -	for (int i = 0; i < LastMemoryMapSize / LastDescriptorSize; ++i) {
 -		MemoryEntry = (EFI_MEMORY_DESCRIPTOR*)((UINT8*)LastMemoryMap + LastDescriptorSize * i);
 -		uint64_t start = MemoryEntry->PhysicalStart;
@@ -63,13 +63,28 @@ index 944db09..1e5df52 100644
 -		case EfiACPIReclaimMemory:
 -			clear_dcache_range(start, size);
 -			break;
--		}
--	}
--
- 	EFI_STATUS status = uefi_call_wrapper(real_ExitBootServices, 2, ImageHandle, MapKey);
- 	if (EFI_ERROR(status))
- 		return status;
-@@ -229,6 +208,7 @@ EFI_STATUS efi_main(EFI_HANDLE ImageHandle, EFI_SYSTEM_TABLE *SystemTable)
++	if (LastMemoryMap && LastDescriptorSize >= sizeof(EFI_MEMORY_DESCRIPTOR) &&
++	    LastMemoryMapSize >= sizeof(EFI_MEMORY_DESCRIPTOR)) {
++		for (UINTN offset = 0;
++		     offset <= LastMemoryMapSize - sizeof(EFI_MEMORY_DESCRIPTOR);
++		     offset += LastDescriptorSize) {
++			MemoryEntry = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)LastMemoryMap + offset);
++			if ((MemoryEntry->Type == EfiLoaderCode ||
++			     MemoryEntry->Type == EfiLoaderData ||
++			     MemoryEntry->Type == EfiRuntimeServicesCode ||
++			     MemoryEntry->Type == EfiRuntimeServicesData) &&
++			    MemoryEntry->NumberOfPages <= UINT64_MAX / 4096) {
++				uint64_t start = MemoryEntry->PhysicalStart;
++				uint64_t size = MemoryEntry->NumberOfPages * 4096;
++				if (start <= UINT64_MAX - size)
++					clear_dcache_range(start, size);
++			}
++			if (LastMemoryMapSize - offset < LastDescriptorSize)
++				break;
+ 		}
+ 	}
+ 
+@@ -229,6 +232,7 @@
  	}
  
  	Print(L"===[ slbounce ]==================================\n");
