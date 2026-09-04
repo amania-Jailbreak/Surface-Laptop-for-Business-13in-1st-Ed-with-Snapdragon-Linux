@@ -29,6 +29,7 @@ configuration is not treated as proof that the hardware works.
 | --- | --- | --- |
 | USB-C host mode | Working | Both USB-C controllers have been used with external storage, hubs, and a display adapter. |
 | Boot from USB-C storage | Working | USB, PHY, DWC3, xHCI, SCSI, UAS, and root filesystem support must be available before the root mount. |
+| Internal UFS storage | Tested on the Proxmox boot path | The board DT already contains the Qualcomm UFS PHY/controller; the public build now enables both and carries modular UFS drivers in initramfs. |
 | Internal USB-A and keyboard/touchpad | Working | The internal HID devices enumerate through xHCI. |
 | Touchscreen | Working | HID-over-I2C at `0x34`; the HID descriptor address is `0`. |
 | Wi-Fi | Working | Qualcomm WCN7850; firmware is supplied by the target OS. |
@@ -118,6 +119,7 @@ The available targets are:
 ./build.sh uki         # assemble the normal UKI variants
 ./build.sh bluetooth   # build the Bluetooth test UKI
 ./build.sh fingerprint # build the fingerprint test UKI
+./build.sh sleep       # build a separate s2idle sleep test UKI
 ./build.sh android     # stage the optional Waydroid Android Mode
 ./build.sh package     # create a local component/recovery set
 ./build.sh release     # create the versioned ARM64 release package
@@ -150,10 +152,11 @@ practical filesystem and boot-entry naming; they all target the device named
 above:
 
 ```text
-surface-laptop-13-current.efi       USB-C host, touchscreen, and base audio
+surface-laptop-13-current.efi       USB-C host, internal UFS, touchscreen, and base audio
 surface-laptop-13-bluetooth.efi     base hardware plus the WCN7850 UART
 surface-laptop-13-fingerprint.efi   Bluetooth hardware plus the fingerprint USB host
 surface-laptop-13-android.efi       optional Waydroid Android Mode
+surface-laptop-13-s2idle.efi        separate s2idle suspend test
 ```
 
 The normal `current` artifact uses the all-feature DTB selected by the public
@@ -169,8 +172,10 @@ and checks the ESP free space before copying anything.
 When the system disk is connected through USB-C, the early boot path is the
 critical part. USB host mode, the Qualcomm USB PHY, DWC3, xHCI, USB storage,
 UAS, SCSI, and root filesystem support must be built in or included in the
-initramfs before the root filesystem is discovered. CIFS and WireGuard usually
-belong in the installed module tree and do not need to be in the initramfs.
+initramfs before the root filesystem is discovered. The internal UFS path is
+enabled in the base DT and its modular PHY/host dependencies are included in
+the same initramfs. CIFS and WireGuard usually belong in the installed module
+tree and do not need to be in the initramfs.
 
 The overlays are board-specific. The touchscreen HID descriptor address and
 the Bluetooth UART wiring must not be copied from another Snapdragon Surface

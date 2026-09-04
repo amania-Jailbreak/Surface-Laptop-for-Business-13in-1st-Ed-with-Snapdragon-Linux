@@ -31,10 +31,15 @@ those files, kmod cannot distinguish a deliberately built-in driver such as
 UAS from a missing module.
 
 `surface-hardware-init-premount` uses the generated dependency metadata to
-load the USB-attached system disk, both Type-C PHY paths, the touchscreen HID
-stack, and the optional desktop modules before root discovery. The Bluetooth
-and Waydroid hooks remain separate and are included in both standard UKI
-variants.
+load the USB-attached system disk, both Type-C PHY paths, the internal UFS
+QMP PHY and Qualcomm host path, the touchscreen HID stack, and the optional
+desktop modules before root discovery. The Bluetooth and Waydroid hooks remain
+separate and are included in both standard UKI variants.
+
+The UFS controller is not the `UFS_FS` filesystem option. The hardware path is
+the SCSI UFS host stack (`SCSI_UFSHCD`), the platform glue, the Qualcomm host
+driver, and the Qualcomm QMP UFS PHY. The builder checks each of those symbols
+and verifies that every modular part is present in the generated initramfs.
 
 The builder registers all three hooks in the base archive's
 `scripts/init-premount/ORDER`. Adding a script to that directory alone does

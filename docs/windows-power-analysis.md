@@ -34,6 +34,69 @@ as evidence that the two DWC3 wrappers and their xHCI children must be kept as
 a coordinated power-management unit when the root disk is attached through
 USB-C.
 
+## SuperSpeed and retimer evidence
+
+The installer also contains a useful description of the USB 3 path. The
+relevant INF files bind to these ACPI devices:
+
+| Installer component | Windows binding | Role indicated by the INF |
+| --- | --- | --- |
+| `qcusbcucsi8380` | `ACPI\\QCOM0CA4` (`UCS0`) | USB-C/UCSI policy and power-framework client |
+| `QcUsb4Bus8380` | `ACPI\\QCOM0C6D` | USB4 bus device |
+| `QcUsb4Filter8380` | `USB4\\QCOM0CD10001` | USB4 host-router filter, marked for USB-disk boot loading |
+| `QcXhciFilter8380` | `URS\\QCOM0C8B/0C8C/0D07` plus `ACPI\\QCOM0CA1/0D08/0D09` | xHCI/URS host-mode filter |
+| `QcUsbFnSsFilter8380` | `URS\\QCOM0C8B/0C8C/0D07&FUNCTION` | USB function-mode SuperSpeed filter |
+
+The native filters contain state names for PHY presets, USB 3 warm-up,
+quick bit lock, link lane disable, standby, and SuperSpeed/SuperSpeedPlus
+transitions. They are not Linux drivers, but they explain why merely enabling
+the DWC3 and xHCI devices is not equivalent to the Windows configuration.
+
+The embedded platform device tree in `Surface_UEFI_9.166.235.bin` is more
+directly useful. Its `usb0`, `usb1`, and `usb2` blocks each describe a PS8830
+retimer, use a 100 kHz management bus, allow up to 500 microseconds of clock
+stretching, and wait 20 milliseconds after reset. The entries are:
+
+| Firmware block | QMP block | I2C bus field | Target | Reset field | Power-enable fields |
+| --- | --- | ---: | ---: | --- | --- |
+| `usb0` | `fd5000` | `4` | `0x08` | `9` | `3p3=10`, `1p1=0`, `1p8=0` |
+| `usb1` | `fda000` | `8` | `0x08` | `176` | `3p3=186`, `1p1=188`, `1p8=175` |
+| `usb2` | `fdf000` | `2` | `0x08` | `185` | `3p3=187`, `1p1=189`, `1p8=126` |
+
+The GPIO values above are firmware resource fields, not ready-made Linux
+`gpio-ranges` or regulator references. The `usb1` values line up with the
+TLMM GPIOs used by the upstream X1E Microsoft Type-C example; the `usb0`
+fields still require an exact PMIC/TLMM provider mapping before they can be
+used in a Linux DT. `usb2` is disabled in the current Linux board description
+and is not part of the first external-port test.
+
+The same firmware tree contains complete SuperSpeed PHY register tables for
+`fd5000`, `fda000`, and `fdf000`. This is evidence that the QMP PHY blocks are
+expected to be paired with the retimer and its power sequence. It is not a
+reason to copy the vendor register table into Linux: the upstream Qualcomm
+QMP driver already owns the PHY programming.
+
+The observed Linux state is consistent with the missing retimer path:
+
+* the active Type-C storage controller (`a600000`, QMP `fd5000`) enumerates the
+  RTL9210 at 480 Mb/s on USB bus 1;
+* the USB 3 companion bus has no corresponding storage device;
+* the Linux DT connects the QMP PHY directly to DWC3 and contains no PS8830
+  node; and
+* the QMP PHY reports dummy `vdda-phy`/`vdda-pll` supplies because those supply
+  relationships are not described.
+
+This makes the first speed test a separate DTB/UKI that enables the exact
+QUP0 SE4 and QUP1 SE0 I2C paths, adds the PS8830 graph, and supplies the
+retimer rails. It must be tested without replacing either known-good UKI.
+The USB4 host-router resource at ACPI `QCOM0D09` (I2C address `0x4b` on
+`I2C6`/QUP0 SE5) is a different path and must not be mistaken for the PS8830
+at address `0x08`.
+
+The MSI, its extracted files, and all Windows `.sys` files remain outside this
+repository. Only the installer SHA256 and the hardware facts needed to
+reproduce the Linux investigation are recorded here.
+
 ## GPIO29 and the display rail
 
 The ACPI `TDPR` power resource maps to the Linux `regulator-edp-3p3` rail:
@@ -67,7 +130,6 @@ the USB-C system disk remains available while the display can still turn off.
 
 This is a bring-up workaround, not proof that deep suspend is safe. Deep sleep
 must remain a separate test after a reliable non-USB root boot path exists.
-
 ## Display-off path
 
 The panel in the tested machine identifies as `Monitor\\LGD07AD`. The matching

@@ -39,6 +39,14 @@ load_module uas
 load_module nvme_core
 load_module nvme
 
+# The internal storage is a Qualcomm UFS device. The QMP UFS PHY and host
+# glue may be modules in a distribution kernel, so load them before root
+# discovery as well as carrying them in the matching initramfs.
+load_module phy_qcom_qmp_ufs
+load_module ufshcd_core
+load_module ufshcd_pltfrm
+load_module ufs_qcom
+
 if command -v udevadm >/dev/null 2>&1; then
 	udevadm trigger --type=devices --action=add >/dev/null 2>&1 || true
 	udevadm settle --timeout=10 >/dev/null 2>&1 || true

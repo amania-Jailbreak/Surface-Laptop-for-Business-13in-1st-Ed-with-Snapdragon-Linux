@@ -7,6 +7,7 @@ its driver builds.
 | Feature | Status | Source / artifact | Notes |
 | --- | --- | --- | --- |
 | USB-C host and external storage | tested | base DTS, DWC3/QMP config | required for USB-root boot |
+| Internal UFS storage | tested on the Proxmox boot path | base DTS, UFS host/PHY config | base DT nodes were disabled and are now enabled for all public variants |
 | USB-A and internal HID | tested | base DTS, kernel config | keyboard and touchpad |
 | Touchscreen | tested | `touchscreen.dtso` | HID-over-I2C at `0x34` |
 | Wi-Fi | tested | WCN7850 firmware manifest | firmware supplied separately |

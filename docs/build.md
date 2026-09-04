@@ -5,8 +5,8 @@ The public build has four independent inputs:
 | Input | Source | Result |
 | --- | --- | --- |
 | Kernel | Linux source plus the neutral config | `Image`, modules, release |
-| Device tree | measured Type-C DTB plus touchscreen/Bluetooth/fingerprint overlays | touchscreen, touchscreen+Bluetooth, and experimental fingerprint DTBs |
-| Initramfs | OS-provided initramfs plus early Surface hooks | boot initramfs |
+| Device tree | measured Type-C DTB plus UFS nodes and touchscreen/Bluetooth/fingerprint overlays | touchscreen, touchscreen+Bluetooth, and experimental fingerprint DTBs with UFS enabled |
+| Initramfs | OS-provided initramfs plus early Surface storage hooks | boot initramfs with USB-C and UFS module paths |
 | UKI metadata | neutral `os-release` and caller cmdline | EFI UKI |
 
 `build.sh package` runs these stages and writes a local recovery set. It never
@@ -83,4 +83,6 @@ The generated module tree contains the optional CIFS and WireGuard modules in
 addition to the Surface drivers. Install that module tree into the target OS
 with the distribution's normal module-packaging tools. Only modules needed
 before root discovery belong in the initramfs; CIFS and WireGuard can remain in
-the installed module tree for ordinary post-boot use.
+the installed module tree for ordinary post-boot use. The internal UFS path has
+the same early-boot requirement: its QMP UFS PHY and Qualcomm host modules are
+seeded into the matching initramfs when they are modular.

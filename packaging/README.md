@@ -49,6 +49,16 @@ For distributions that do not use Debian packages, use the same
 `SURFACE-CURRENT` directory as a release tarball and run the installer from
 the extracted directory.
 
+To test suspend without changing the normal boot files, build the separate
+s2idle UKI with `./build.sh sleep` and install it with:
+
+```sh
+sudo packaging/install-s2idle.sh /tmp/surface-laptop-13-build/uki/surface-laptop-13-s2idle.efi
+```
+
+This installer creates only `surface-laptop-13-s2idle.efi` and its matching
+entry, and refuses to overwrite an existing file.
+
 ## Release checklist
 
 - build with the intended root command line and matching initramfs;

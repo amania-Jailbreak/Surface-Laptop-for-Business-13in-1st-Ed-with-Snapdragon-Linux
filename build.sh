@@ -215,6 +215,7 @@ check_kernel_features() {
 	done
 	for symbol in \
 		CIFS WIREGUARD \
+		SCSI_UFSHCD SCSI_UFSHCD_PLATFORM SCSI_UFS_QCOM PHY_QCOM_QMP_UFS \
 		ANDROID_BINDER_IPC ANDROID_BINDERFS PSI MEMFD_CREATE \
 		BRIDGE BRIDGE_NETFILTER VETH \
 		NF_CONNTRACK NF_NAT IP_NF_IPTABLES IP_NF_FILTER IP_NF_NAT IP_NF_MANGLE \
@@ -317,7 +318,7 @@ build_kernel() {
 build_dtb() {
 	need dtc; need fdtoverlay; need fdtget
 	mkdirs
-	log "Building Type-C, touchscreen, Bluetooth, and fingerprint device trees"
+	log "Building Type-C, touchscreen, Bluetooth, fingerprint, and UFS device trees"
 	local raw_base_dtb="$DTB_OUT/surface-laptop-13-typec-base.dtb"
 	# The public DTS is the normal source of truth. A separately supplied
 	# measured DTB can be selected explicitly for comparison, but a clean clone
@@ -352,6 +353,10 @@ build_dtb() {
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000 status)" == okay ]] || die "touchscreen I2C controller is disabled in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 compatible)" == hid-over-i2c ]] || die "touchscreen node is missing in $candidate"
 		[[ "$(fdtget "$candidate" /soc@0/geniqup@ac0000/i2c@a80000/touchscreen@34 hid-descr-addr)" == 0 ]] || die "touchscreen HID descriptor address is not zero in $candidate"
+	done
+	for candidate in "$base_dtb" "$bluetooth_dtb" "$fingerprint_dtb" "$bluetooth_fingerprint_dtb"; do
+		[[ "$(fdtget "$candidate" /soc@0/phy@1d80000 status)" == okay ]] || die "UFS PHY is disabled in $candidate"
+		[[ "$(fdtget "$candidate" /soc@0/ufshc@1d84000 status)" == okay ]] || die "UFS controller is disabled in $candidate"
 	done
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is disabled"
 	[[ "$(fdtget "$bluetooth_dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth compatible is unexpected"
@@ -402,6 +407,7 @@ build_initramfs() {
 		kernel/drivers/net/wireguard/wireguard.ko \
 		kernel/drivers/nvme/host/nvme-core.ko \
 		kernel/drivers/nvme/host/nvme.ko \
+		kernel/drivers/phy/qualcomm/phy-qcom-qmp-ufs.ko \
 		kernel/drivers/nvmem/nvmem_qcom-spmi-sdam.ko \
 		kernel/drivers/phy/qualcomm/phy-qcom-eusb2-repeater.ko \
 		kernel/drivers/phy/qualcomm/phy-qcom-m31.ko \
@@ -420,6 +426,9 @@ build_initramfs() {
 		kernel/drivers/soc/qcom/socinfo.ko \
 		kernel/drivers/thermal/qcom/qcom-spmi-temp-alarm.ko \
 		kernel/drivers/usb/storage/uas.ko \
+		kernel/drivers/ufs/core/ufshcd-core.ko \
+		kernel/drivers/ufs/host/ufshcd-pltfrm.ko \
+		kernel/drivers/ufs/host/ufs-qcom.ko \
 		kernel/fs/smb/client/cifs.ko \
 		kernel/lib/crypto/libmd5.ko \
 		kernel/net/ipv4/udp_tunnel.ko \
@@ -521,6 +530,20 @@ build_initramfs() {
 			kernel/drivers/usb/storage/uas.ko; do
 			printf '%s\n' "$builtin_list" | grep -Fxq "$builtin_path" \
 				|| die "USB-root built-in metadata is missing: $builtin_path ($initrd)"
+		done
+		for ufs_module in \
+			kernel/drivers/phy/qualcomm/phy-qcom-qmp-ufs.ko \
+			kernel/drivers/ufs/core/ufshcd-core.ko \
+			kernel/drivers/ufs/host/ufshcd-pltfrm.ko \
+			kernel/drivers/ufs/host/ufs-qcom.ko; do
+			if [[ -f "$MODULE_OUT/lib/modules/$krel/$ufs_module" ]]; then
+				gzip -dc "$initrd" | cpio -it --quiet \
+					"usr/lib/modules/$krel/$ufs_module" >/dev/null 2>&1 \
+					|| die "UFS module is missing from initramfs: $ufs_module ($initrd)"
+			else
+				printf '%s\n' "$builtin_list" | grep -Fxq "$ufs_module" \
+					|| die "UFS module is neither built in nor in initramfs: $ufs_module ($initrd)"
+			fi
 		done
 	done
 	rm -f "$base_copy"
