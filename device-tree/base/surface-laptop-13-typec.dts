@@ -2661,7 +2661,8 @@
 			power-domains = <0x34 0x0c>;
 			#clock-cells = <0x01>;
 			#phy-cells = <0x00>;
-			status = "disabled";
+			/* The internal UFS device is the normal Surface root disk. */
+			status = "okay";
 			phandle = <0x31>;
 		};
 
@@ -2684,7 +2685,8 @@
 			phys = <0x31>;
 			phy-names = "ufsphy";
 			#reset-cells = <0x01>;
-			status = "disabled";
+			/* Keep UFS available for normal boots and alternate boot paths. */
+			status = "okay";
 			phandle = <0x96>;
 
 			opp-table {

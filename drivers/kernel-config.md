@@ -24,6 +24,13 @@ CONFIG_USB_UAS=y
 CONFIG_SCSI=y
 CONFIG_BLK_DEV_SD=y
 CONFIG_EXT4_FS=y
+
+# Internal Qualcomm UFS storage. The QCOM host and QMP PHY may be modules;
+# the Surface initramfs builder includes them and their generated dependencies.
+CONFIG_SCSI_UFSHCD=y
+CONFIG_SCSI_UFSHCD_PLATFORM=y
+CONFIG_SCSI_UFS_QCOM=m
+CONFIG_PHY_QCOM_QMP_UFS=m
 CONFIG_BT=m
 CONFIG_BT_HCIUART=m
 CONFIG_BT_HCIUART_SERDEV=y

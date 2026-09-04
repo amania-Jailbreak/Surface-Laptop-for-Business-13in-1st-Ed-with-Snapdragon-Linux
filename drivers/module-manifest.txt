@@ -11,6 +11,7 @@ kernel/drivers/hid/i2c-hid/i2c-hid-of.ko
 kernel/drivers/i2c/busses/i2c-qcom-geni.ko
 kernel/drivers/nvme/host/nvme-core.ko
 kernel/drivers/nvme/host/nvme.ko
+kernel/drivers/phy/qualcomm/phy-qcom-qmp-ufs.ko
 kernel/drivers/phy/qualcomm/phy-qcom-qmp-combo.ko
 kernel/drivers/phy/qualcomm/phy-qcom-qmp-usbc.ko
 kernel/drivers/phy/qualcomm/phy-qcom-qusb2.ko
@@ -21,6 +22,9 @@ kernel/net/802/stp.ko
 kernel/net/bridge/bridge.ko
 kernel/net/bridge/br_netfilter.ko
 kernel/drivers/net/veth.ko
+kernel/drivers/ufs/core/ufshcd-core.ko
+kernel/drivers/ufs/host/ufshcd-pltfrm.ko
+kernel/drivers/ufs/host/ufs-qcom.ko
 kernel/net/netfilter/x_tables.ko
 kernel/net/ipv4/netfilter/ip_tables.ko
 kernel/net/ipv4/netfilter/iptable_filter.ko
