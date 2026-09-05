@@ -2,24 +2,20 @@
 
 ## Hardware-test status
 
-The corrected installed boot payload was deployed over SSH and every destination
-was verified against its build-side SHA256. A one-shot `surface-el2-kvm` boot was
-then requested and `ssh root@surface-pve reboot` executed. SSH did not return
-during the initial monitoring period. **EL2/KVM success and the cause of the
-hardware reset are not yet established.** Screen feedback is needed before the
-next trial. Do not describe this deployment as a successful KVM boot.
+The second trial is successful. The machine is currently running the installed
+KVM entry and SSH is stable. The kernel reports `CPU: All CPU(s) started at
+EL2`, KVM initializes VHE, `/dev/kvm` exists, the KVM API is 12, and
+`KVM_CREATE_VM` succeeds. QEMU also reports `kvm support: enabled` on the host.
+The fallback service completed successfully and the one-shot `next_entry` is
+cleared. The original Ready entry remains available as the recovery path.
 
-Later screen feedback shows Linux boot output and repeated apps-SMMU
-`Unhandled context fault` messages, apparently for SID `0x1000` (ADSP).
-Thus this trial progressed past GRUB; EL2 status still needs a kernel log.
-The user power-cycled back to Ready and SSH returned. Ready reports backlight
-2048/4095 and missing ADSP/CDSP firmware. A diagnostic DTB disabling the two
-remoteprocs and sound, with an explicit 75% PWM boot brightness, was built as
-`build/kvm-audit/ready-el2-no-dsp-bright.dtb`. This sacrifices DSP/audio for
-fault isolation; it is not a confirmed root-cause fix. Automatic approval
-review rejected its deployment and the immediate brightness adjustment, so
-neither action ran. Explicit approval is pending. The original deployed
-bundle remained installed while awaiting approval.
+The initial trial showed Linux boot output followed by repeated apps-SMMU
+`Unhandled context fault` messages, apparently for SID `0x1000` (ADSP), and the
+machine was power-cycled back to Ready. Ready then reported backlight 2048/4095
+and missing ADSP/CDSP firmware. A diagnostic DTB disabling the two remoteprocs
+and sound, with an explicit 75% PWM boot brightness, was built as
+`build/kvm-audit/ready-el2-no-dsp-bright.dtb`. This sacrificed DSP/audio for
+fault isolation; it was not treated as a fix until the second trial.
 
 The user subsequently authorized the diagnostic deployment. It completed with
 all destination hashes verified; the EL2 DTB is
@@ -29,7 +25,22 @@ to 3500/4095. Backup: `/var/backups/surface-kvm/20260905T132028Z`.
 The Ready components were verified unchanged, KVM selected once with
 `grub-reboot`, and the second trial reboot executed. See
 `deploy-no-dsp.log` and `pre-reboot-no-dsp.txt` under the audit directory.
-This trial's outcome must still be checked before claiming the fault is fixed.
+The final live verification is in `final-verification.txt`, `kvm-success.txt`,
+and `qemu-kvm-test.txt`.
+
+The photographed fault storm no longer appears in `dmesg` with this DTB. The
+fault was associated with the EL2 remoteproc/audio path: the old DTB allowed
+ADSP/CDSP probing even though the installed kernel had neither the detached-DSP
+attach support nor the corresponding early DSP firmware handoff. The deployed
+diagnostic overlay disables those two remoteprocs and the sound card, preventing
+the untranslated SID `0x1000` transactions. This is the validated KVM boot
+fix for this installation, with DSP/audio intentionally disabled. Restoring
+DSP/audio requires a separate qebspil plus detached-remoteproc kernel change;
+it is not silently enabled by this deployment.
+
+The PWM DTB table now has 12 levels and the live value is 11/11, so the panel
+boots at its maximum driver brightness. This setting is independent of KVM;
+userspace can change it after boot.
 
 The kernel was deliberately reused from the existing build because its bytes
 match the working Ready kernel. It was **not recompiled for this trial**.
@@ -109,10 +120,10 @@ initramfs, DTB, shim, and normal GRUB hashes were verified unchanged.
 The original Ready remains the default; KVM was selected for one attempt with
 `grub-reboot surface-el2-kvm`. The KVM menu arms Ready for the following boot.
 
-After hardware recovery, check `/proc/cmdline`, `dmesg` for `started at EL2`,
-`/dev/kvm`, and a real KVM VM-creation ioctl before setting a persistent KVM
-default. If the screen hangs, restart and select `FUSE/PVE ready`; do not repeat
-an unknown failing KVM path without collecting its final screen state.
+For future maintenance, check `/proc/cmdline`, `dmesg` for `started at EL2`,
+`/dev/kvm`, and a real KVM VM-creation ioctl before making KVM persistent. If
+the screen hangs, restart and select `FUSE/PVE ready`; the installed fallback
+still preserves that path.
 
 The installer accepts a flat bundle containing the files named in its `mapping`,
 SHA256SUMS, and provenance.json. Transfer it with SSH, then run the Python
