@@ -11,6 +11,7 @@ KERNEL_IMAGE=${KERNEL_IMAGE:-$WORK_DIR/kernel/Image}
 DTB_FILE=${DTB_FILE:-$WORK_DIR/dtb/surface-laptop-13-current.dtb}
 DTB_NAME=${DTB_NAME:-surface-laptop-13-current.dtb}
 INITRD_FILE=${INITRD_FILE:-}
+WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 EFI_IMAGE=${EFI_IMAGE:-}
 EL2_DTB_FILE=${EL2_DTB_FILE:-}
 EL2_DTB_NAME=${EL2_DTB_NAME:-surface-laptop-13-el2.dtb}
@@ -74,6 +75,8 @@ Options:
   --el2-dtb-name NAME Name of the EL2 DTB inside /boot (default: surface-laptop-13-el2.dtb).
   --efi-image FILE    Replace the ISO EFI image (required for --el2-dtb).
   --initrd FILE       Replace the ISO initrd with this archive.
+  --wcn7850-firmware DIR
+                      Add ath12k/WCN7850 Wi-Fi firmware to the ISO initrd.
   --no-initrd-modules Keep the selected initrd without adding built modules.
   --allow-untested-tcb Permit an EFI image containing another TCB build.
   --work DIR          Scratch directory (default: ./build/.work).
@@ -144,6 +147,11 @@ parse_args() {
 				shift
 				(($#)) || die "--initrd needs a file"
 				INITRD_FILE=$1
+				;;
+			--wcn7850-firmware)
+				shift
+				(($#)) || die "--wcn7850-firmware needs a directory"
+				WCN7850_FIRMWARE_SOURCE=$1
 				;;
 			--no-initrd-modules)
 				INCLUDE_MODULES=0
@@ -507,6 +515,14 @@ augment_initrd_with_modules() {
 		local relative=${module#"$module_dir"/}
 		printf 'lib/modules/%s/%s %s 0644\n' "$release" "$relative" "$module" >>"$manifest"
 	done < <(find "$module_dir" -type f -print0 | sort -z)
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		local wifi_firmware wifi_relative
+		while IFS= read -r -d '' wifi_firmware; do
+			wifi_relative=${wifi_firmware#"$WCN7850_FIRMWARE_SOURCE"/}
+			printf 'lib/firmware/ath12k/WCN7850/hw2.0/%s %s 0644\n' \
+				"$wifi_relative" "$wifi_firmware" >>"$manifest"
+		done < <(find "$WCN7850_FIRMWARE_SOURCE" -type f -print0 | sort -z)
+	fi
 	python3 "$ROOT_DIR/initramfs/scripts/augment-newc-initramfs.py" \
 		"$base_initrd" "$augmented" "$manifest"
 	# The augmentation helper emits gzip-compressed newc. Recompress the cpio
@@ -608,6 +624,9 @@ main() {
 	if [[ -n "$INITRD_FILE" ]]; then
 		INITRD_FILE=$(absolute_path "$INITRD_FILE")
 	fi
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		WCN7850_FIRMWARE_SOURCE=$(absolute_path "$WCN7850_FIRMWARE_SOURCE")
+	fi
 	if [[ -n "$EFI_IMAGE" ]]; then
 		EFI_IMAGE=$(absolute_path "$EFI_IMAGE")
 	fi
@@ -621,6 +640,13 @@ main() {
 	[[ "$EL2_DTB_NAME" != */* && "$EL2_DTB_NAME" != "" ]] || die "--el2-dtb-name must be a file name without '/': $EL2_DTB_NAME"
 	if [[ -n "$INITRD_FILE" ]]; then
 		[[ -f "$INITRD_FILE" ]] || die "initrd not found: $INITRD_FILE"
+	fi
+	if [[ -n "$WCN7850_FIRMWARE_SOURCE" ]]; then
+		[[ -d "$WCN7850_FIRMWARE_SOURCE" ]] || die "WCN7850 firmware directory not found: $WCN7850_FIRMWARE_SOURCE"
+		for firmware in amss.bin m3.bin board-2.bin; do
+			[[ -f "$WCN7850_FIRMWARE_SOURCE/$firmware" ]] ||
+				die "WCN7850 firmware missing: $WCN7850_FIRMWARE_SOURCE/$firmware"
+		done
 	fi
 	if [[ -n "$EFI_IMAGE" ]]; then
 		[[ -f "$EFI_IMAGE" ]] || die "EFI image not found: $EFI_IMAGE"

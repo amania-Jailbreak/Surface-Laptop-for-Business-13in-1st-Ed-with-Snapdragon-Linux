@@ -7,6 +7,7 @@ TARGET_IMAGE=${TARGET_IMAGE:-}
 KERNEL_SOURCE=${KERNEL_SOURCE:-/root/linux}
 INITRD_BASE=${INITRD_BASE:-}
 FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
+WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 UKI_STUB=${UKI_STUB:-}
 UKIFY=${UKIFY:-}
 SURFACE_OUTPUT_DIR=${SURFACE_OUTPUT_DIR:-$ROOT_DIR/build}
@@ -42,13 +43,16 @@ Options:
   --kernel DIR         Linux source tree (default: /root/linux).
   --initrd FILE        Existing target initramfs archive.
   --firmware DIR       Directory containing qca firmware files.
+  --wcn7850-firmware DIR
+                       Directory containing ath12k/WCN7850 Wi-Fi firmware.
   --stub FILE          ARM64 linuxaa64.efi.stub file.
   --output DIR         Final artifact directory (default: ./build).
   --no-download-stub   Do not download systemd-boot-efi:arm64 when needed.
   -h, --help           Show this help.
 
 Environment variables with the same names are also accepted:
-  TARGET_ROOT TARGET_IMAGE KERNEL_SOURCE INITRD_BASE FIRMWARE_SOURCE UKI_STUB UKIFY
+  TARGET_ROOT TARGET_IMAGE KERNEL_SOURCE INITRD_BASE FIRMWARE_SOURCE
+  WCN7850_FIRMWARE_SOURCE UKI_STUB UKIFY
   SURFACE_OUTPUT_DIR SURFACE_WORK_DIR KERNEL_APPLY_PATCHES
 
 Examples:
@@ -57,6 +61,7 @@ Examples:
   ./build-debian.sh --target-image /path/to/existing-arm64-rootfs.img package
   INITRD_BASE=/mnt/target/boot/initrd.img-6.x \
     FIRMWARE_SOURCE=/mnt/target/lib/firmware/qca \
+    WCN7850_FIRMWARE_SOURCE=/mnt/target/lib/firmware/ath12k/WCN7850/hw2.0 \
     ./build-debian.sh package
 EOF
 }
@@ -98,6 +103,11 @@ parse_args() {
 				shift
 				(($#)) || die "--firmware needs a directory"
 				FIRMWARE_SOURCE=$1
+				;;
+			--wcn7850-firmware)
+				shift
+				(($#)) || die "--wcn7850-firmware needs a directory"
+				WCN7850_FIRMWARE_SOURCE=$1
 				;;
 			--stub)
 				shift
@@ -210,6 +220,21 @@ find_firmware_dir() {
 	done
 }
 
+find_wcn7850_firmware_dir() {
+	[[ -n "$WCN7850_FIRMWARE_SOURCE" ]] && return 0
+	local candidate
+	for candidate in \
+		"$TARGET_ROOT/lib/firmware/ath12k/WCN7850/hw2.0" \
+		"$TARGET_ROOT/usr/lib/firmware/ath12k/WCN7850/hw2.0" \
+		/lib/firmware/ath12k/WCN7850/hw2.0 \
+		/usr/lib/firmware/ath12k/WCN7850/hw2.0; do
+		if [[ -d "$candidate" ]]; then
+			WCN7850_FIRMWARE_SOURCE=$candidate
+			return 0
+		fi
+	done
+}
+
 find_ukify() {
 	if [[ -n "$UKIFY" ]]; then
 		[[ -x "$UKIFY" ]] || die "ukify executable not found: $UKIFY"
@@ -283,6 +308,13 @@ validate_required_inputs() {
 	local nv_files=("$FIRMWARE_SOURCE"/hmtnv20.*)
 	shopt -u nullglob
 	((${#nv_files[@]} > 0)) || die "Bluetooth calibration firmware missing: $FIRMWARE_SOURCE/hmtnv20.*"
+	[[ -d "$WCN7850_FIRMWARE_SOURCE" ]] ||
+		die "WCN7850 firmware directory not found: ${WCN7850_FIRMWARE_SOURCE:-<unset>} (pass --wcn7850-firmware DIR)"
+	local wifi_firmware
+	for wifi_firmware in amss.bin m3.bin board-2.bin; do
+		[[ -f "$WCN7850_FIRMWARE_SOURCE/$wifi_firmware" ]] ||
+			die "WCN7850 firmware missing: $WCN7850_FIRMWARE_SOURCE/$wifi_firmware"
+	done
 
 	command -v python3 >/dev/null 2>&1 || die "python3 not found"
 	python3 - "$INITRD_BASE" <<'PY'
@@ -310,6 +342,7 @@ validate_inputs() {
 prepare_full_inputs() {
 	find_initramfs
 	find_firmware_dir
+	find_wcn7850_firmware_dir
 	validate_required_inputs
 	find_ukify
 	find_ukistub
@@ -318,7 +351,7 @@ prepare_full_inputs() {
 }
 
 run_build() {
-	export KERNEL_SOURCE INITRD_BASE FIRMWARE_SOURCE UKI_STUB UKIFY
+	export KERNEL_SOURCE INITRD_BASE FIRMWARE_SOURCE WCN7850_FIRMWARE_SOURCE UKI_STUB UKIFY
 	export SURFACE_OUTPUT_DIR SURFACE_WORK_DIR KERNEL_APPLY_PATCHES
 	export KERNEL_CONFIG="$ROOT_DIR/kernel/config/base.config"
 	export KERNEL_CONFIG_FRAGMENT="$ROOT_DIR/kernel/config/desktop.config"
@@ -330,6 +363,7 @@ run_build() {
 	[[ "$BUILD_TARGET" == dtb || "$BUILD_TARGET" == verify ]] || {
 		printf 'initramfs: %s\n' "$INITRD_BASE"
 		printf 'firmware: %s\n' "$FIRMWARE_SOURCE"
+		printf 'WCN7850 Wi-Fi firmware: %s\n' "$WCN7850_FIRMWARE_SOURCE"
 		printf 'ukify: %s\n' "$UKIFY"
 		printf 'EFI stub: %s\n' "$UKI_STUB"
 	}

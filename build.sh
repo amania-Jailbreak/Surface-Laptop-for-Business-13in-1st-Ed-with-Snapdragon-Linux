@@ -40,6 +40,10 @@ resolve_ukify() {
 KERNEL_SOURCE=${KERNEL_SOURCE:-}
 INITRD_BASE=${INITRD_BASE:-}
 FIRMWARE_SOURCE=${FIRMWARE_SOURCE:-}
+# WCN7850 Wi-Fi firmware is separate from the Bluetooth/QCA firmware tree.
+# Keep it as an explicit input so a build cannot silently produce an initramfs
+# which probes the PCI device but has no firmware to load.
+WCN7850_FIRMWARE_SOURCE=${WCN7850_FIRMWARE_SOURCE:-}
 KERNEL_CONFIG=${KERNEL_CONFIG:-$PUBLIC_DIR/kernel/config/base.config}
 KERNEL_CONFIG_FRAGMENT=${KERNEL_CONFIG_FRAGMENT:-$PUBLIC_DIR/kernel/config/desktop.config}
 BASE_DTS=${BASE_DTS:-$PUBLIC_DIR/device-tree/base/surface-laptop-13-typec.dts}
@@ -136,11 +140,17 @@ check_full_inputs() {
 	[[ -n "$KERNEL_SOURCE" ]] || die "KERNEL_SOURCE is not set"
 	[[ -n "$INITRD_BASE" ]] || die "INITRD_BASE is not set"
 	[[ -n "$FIRMWARE_SOURCE" ]] || die "FIRMWARE_SOURCE is not set"
+	[[ -n "$WCN7850_FIRMWARE_SOURCE" ]] || die "WCN7850_FIRMWARE_SOURCE is not set"
 	local f
 	for f in "$KERNEL_SOURCE/Makefile" "$INITRD_BASE" "$UKI_STUB"; do
 		[[ -f "$f" ]] || die "input not found: $f"
 	done
 	[[ -d "$FIRMWARE_SOURCE" ]] || die "firmware directory not found: $FIRMWARE_SOURCE"
+	[[ -d "$WCN7850_FIRMWARE_SOURCE" ]] || die "WCN7850 firmware directory not found: $WCN7850_FIRMWARE_SOURCE"
+	for f in amss.bin m3.bin board-2.bin; do
+		[[ -f "$WCN7850_FIRMWARE_SOURCE/$f" ]] ||
+			die "WCN7850 firmware missing: $WCN7850_FIRMWARE_SOURCE/$f"
+	done
 }
 
 apply_public_patches() {
@@ -346,6 +356,12 @@ build_initramfs() {
 		[[ -f "$firmware" ]] || continue
 		printf 'usr/lib/firmware/qca/%s %s 0644\n' "$(basename "$firmware")" "$firmware" >>"$manifest"
 	done
+	local wifi_firmware relative
+	while IFS= read -r -d '' wifi_firmware; do
+		relative=${wifi_firmware#"$WCN7850_FIRMWARE_SOURCE"/}
+		printf 'usr/lib/firmware/ath12k/WCN7850/hw2.0/%s %s 0644\n' \
+			"$relative" "$wifi_firmware" >>"$manifest"
+	done < <(find "$WCN7850_FIRMWARE_SOURCE" -type f -print0 | sort -z)
 	printf '%s\n' "scripts/init-premount/surface-bluetooth" \
 		"$PUBLIC_DIR/initramfs/scripts/surface-bluetooth-init-premount.sh" "0755" >>"$manifest"
 	python3 "$PUBLIC_DIR/initramfs/scripts/augment-newc-initramfs.py" "$current_initrd" "$bluetooth_initrd" "$manifest"
@@ -441,7 +457,9 @@ package_artifacts() {
 	build_dtb
 	build_uki_pair
 	rm -rf "$CURRENT_DIR/kernel" "$CURRENT_DIR/dtb" "$CURRENT_DIR/initramfs" "$CURRENT_DIR/firmware" "$CURRENT_DIR/uki"
-	mkdir -p "$CURRENT_DIR/kernel" "$CURRENT_DIR/dtb" "$CURRENT_DIR/initramfs" "$CURRENT_DIR/firmware/qca" "$CURRENT_DIR/uki" "$CURRENT_DIR/recovery"
+	mkdir -p "$CURRENT_DIR/kernel" "$CURRENT_DIR/dtb" "$CURRENT_DIR/initramfs" \
+		"$CURRENT_DIR/firmware/qca" "$CURRENT_DIR/firmware/ath12k/WCN7850/hw2.0" \
+		"$CURRENT_DIR/uki" "$CURRENT_DIR/recovery"
 	cp "$kernel_image" "$CURRENT_DIR/kernel/Image"
 	cp "$kernel_config" "$CURRENT_DIR/kernel/config"
 	cp "$kernel_release" "$CURRENT_DIR/kernel/release"
@@ -457,6 +475,13 @@ package_artifacts() {
 		[[ -f "$firmware" ]] || continue
 		cp "$firmware" "$CURRENT_DIR/firmware/qca/"
 	done
+	local wifi_firmware relative destination
+	while IFS= read -r -d '' wifi_firmware; do
+		relative=${wifi_firmware#"$WCN7850_FIRMWARE_SOURCE"/}
+		destination="$CURRENT_DIR/firmware/ath12k/WCN7850/hw2.0/$relative"
+		mkdir -p "$(dirname "$destination")"
+		cp "$wifi_firmware" "$destination"
+	done < <(find "$WCN7850_FIRMWARE_SOURCE" -type f -print0 | sort -z)
 	cp "$PUBLIC_DIR/recovery/restore-components.sh" "$CURRENT_DIR/recovery/restore-components.sh"
 	chmod 0755 "$CURRENT_DIR/recovery/restore-components.sh"
 	cp "$PUBLIC_DIR/README.md" "$CURRENT_DIR/README.md"
@@ -494,6 +519,10 @@ verify() {
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/serial@a98000 status)" == okay ]] || die "Bluetooth UART is not enabled"
 	[[ "$(fdtget "$CURRENT_DIR/dtb/surface-laptop-13-bluetooth.dtb" /soc@0/geniqup@ac0000/serial@a98000/bluetooth compatible)" == qcom,wcn7850-bt ]] || die "Bluetooth node is missing"
 	[[ -f "$CURRENT_DIR/firmware/qca/hmtbtfw20.tlv" ]] || die "Bluetooth firmware is missing"
+	for f in amss.bin m3.bin board-2.bin; do
+		[[ -f "$CURRENT_DIR/firmware/ath12k/WCN7850/hw2.0/$f" ]] ||
+			die "WCN7850 firmware is missing: $f"
+	done
 	while IFS= read -r -d '' f; do
 		case "$f" in
 			*/.work/*) continue ;;

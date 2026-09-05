@@ -9,6 +9,18 @@ Bluetooth target adds:
 - WCN7850 firmware;
 - an early init-premount hook that loads the modules before root discovery.
 
+The WCN7850 Wi-Fi firmware is a separate required input. The ath12k driver is
+built into the Surface kernel, but the PCI device still needs the complete
+`ath12k/WCN7850/hw2.0` tree before it can probe. A direct `build.sh` invocation
+must set `WCN7850_FIRMWARE_SOURCE` to that directory. The Debian wrapper finds
+it automatically below `/lib/firmware` or a mounted target root; use
+`--wcn7850-firmware DIR` to override it.
+
+For an initramfs-tools target, install the repository hook
+`initramfs/hooks/wcn7850-firmware` below `/etc/initramfs-tools/hooks/`, then
+run `update-initramfs`. It copies the same complete firmware tree into the
+generated initramfs, including the `ncm865` subdirectory.
+
 The module paths are generated from the neutral kernel release, so the hook
 does not depend on the release name used by the host distribution.
 

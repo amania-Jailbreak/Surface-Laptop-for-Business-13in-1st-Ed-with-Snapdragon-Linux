@@ -6,9 +6,9 @@ OUTPUT=${OUTPUT:-$ROOT_DIR/build/surface-kvm-grub-installed.efi}
 GRUB_MODULE_DIR=${GRUB_MODULE_DIR:-/usr/lib/grub/arm64-efi}
 ROOT_UUID=${ROOT_UUID:-f621d247-7647-4244-aad3-1fffe95afe92}
 ESP_UUID=${ESP_UUID:-584B-B4D4}
-KERNEL_PATH=${KERNEL_PATH:-/boot/vmlinuz-7.2.0-rc5-surface-laptop-13}
-DTB_PATH=${DTB_PATH:-/boot/surface-laptop-13-el2.dtb}
-INITRD_PATH=${INITRD_PATH:-/boot/initrd.img-7.2.0-rc5-surface-laptop-13}
+KERNEL_PATH=${KERNEL_PATH:-}
+DTB_PATH=${DTB_PATH:-}
+INITRD_PATH=${INITRD_PATH:-}
 # X1P42100 EL2 boots must leave firmware-owned clocks and power domains on.
 # Without these two arguments the kernel may disable a resource still needed
 # by the EL2 transition and reset before the first userspace message.
@@ -48,24 +48,69 @@ Options:
   --grub-dir DIR      ARM64 GRUB module directory.
   --root-uuid UUID    Installed root filesystem UUID.
   --esp-uuid UUID     EFI system partition UUID.
-  --kernel PATH       Kernel path as seen by GRUB.
-  --dtb PATH          EL2 DTB path as seen by GRUB.
-  --initrd PATH       initramfs path as seen by GRUB.
+  --kernel PATH       Kernel path on the selected filesystem.
+  --dtb PATH          EL2 DTB path on the selected filesystem.
+  --initrd PATH       initramfs path on the selected filesystem.
   --kernel-extra-args ARGS
                       Additional kernel arguments (default: preserve X1P EL2
                       clocks/power domains, console/USB safety, ECV override,
                       verbose logging, and no automatic reboot after a panic).
   --payload-from-esp  Load kernel, DTB and initramfs from the ESP's
-                      /EFI/BOOT directory selected by --esp-uuid.
+                      filesystem selected by --esp-uuid; default paths are
+                      /EFI/BOOT/surface-kvm-linux, surface-laptop-13-el2.dtb,
+                      and surface-kvm-initrd.img. Explicit paths override them.
   --payload-from-cmdpath
                       Load the payload beside the standalone GRUB image
-                      without scanning disks or filesystem UUIDs.
+                      without scanning disks or filesystem UUIDs. Relative
+                      paths are relative to cmdpath; absolute paths use the
+                      same device. Every file and load result is checked.
   --work DIR          Temporary work directory.
   -h, --help          Show this help.
 
-The paths are embedded in the GRUB configuration and normally begin with
-/boot; they do not need to exist on the build host.
+Without a payload option, paths refer to /boot on --root-uuid. They do not
+need to exist on the build host. A copy of the embedded configuration is
+written alongside the EFI output, with a .cfg extension. Before entering
+this GRUB, the outer menu must save next_entry=surface-el1-ready; errors
+reboot to that entry because the Secure Launch hook is already installed.
 EOF
+}
+
+resolve_payload_paths() {
+	case "$PAYLOAD_MODE" in
+		root)
+			KERNEL_PATH=${KERNEL_PATH:-/boot/vmlinuz-7.2.0-rc5-surface-laptop-13}
+			DTB_PATH=${DTB_PATH:-/boot/surface-laptop-13-el2.dtb}
+			INITRD_PATH=${INITRD_PATH:-/boot/initrd.img-7.2.0-rc5-surface-laptop-13}
+			;;
+		esp)
+			KERNEL_PATH=${KERNEL_PATH:-/EFI/BOOT/surface-kvm-linux}
+			DTB_PATH=${DTB_PATH:-/EFI/BOOT/surface-laptop-13-el2.dtb}
+			INITRD_PATH=${INITRD_PATH:-/EFI/BOOT/surface-kvm-initrd.img}
+			;;
+		cmdpath)
+			KERNEL_PATH=${KERNEL_PATH:-surface-kvm-linux}
+			DTB_PATH=${DTB_PATH:-surface-laptop-13-el2.dtb}
+			INITRD_PATH=${INITRD_PATH:-surface-kvm-initrd.img}
+			;;
+	esac
+	local uuid path
+	for uuid in "$ROOT_UUID" "$ESP_UUID"; do
+		[[ "$uuid" =~ ^[[:xdigit:]-]+$ ]] || die "invalid filesystem UUID: $uuid"
+	done
+	for path in "$KERNEL_PATH" "$DTB_PATH" "$INITRD_PATH"; do
+		[[ "$path" =~ ^[[:alnum:]_./+-]+$ ]] || die "unsupported payload path: $path"
+		[[ "$PAYLOAD_MODE" == cmdpath || "$path" == /* ]] ||
+			die "payload path must be absolute in $PAYLOAD_MODE mode: $path"
+	done
+}
+
+emit_payload_path() {
+	local name=$1 path=$2
+	if [[ "$PAYLOAD_MODE" == cmdpath && "$path" != /* ]]; then
+		printf '    set %s="${cmdpath}/%s"\n' "$name" "$path"
+	else
+		printf '    set %s="${surface_device}%s"\n' "$name" "$path"
+	fi
 }
 
 parse_args() {
@@ -124,7 +169,9 @@ trap cleanup EXIT
 
 main() {
 	parse_args "$@"
+	resolve_payload_paths
 	need grub-mkstandalone
+	need grub-script-check
 	need file
 	need sha256sum
 
@@ -136,60 +183,91 @@ main() {
 
 	mkdir -p "$WORK_DIR" "$(dirname -- "$OUTPUT")"
 	CONFIG=$(mktemp "$WORK_DIR/installed-kvm-grub.XXXXXX.cfg")
+	cat >"$CONFIG" <<EOF
+set timeout=0
+echo 'surface-kvm: starting installed KVM GRUB (verified payload loads)'
+echo "surface-kvm: prefix=\$prefix cmdpath=\$cmdpath"
+
+function surface_kvm_boot {
+    echo "surface-kvm: kernel=\$surface_kernel"
+    echo "surface-kvm: EL2 DTB=\$surface_dtb"
+    echo "surface-kvm: initramfs=\$surface_initrd"
+    if ! [ -s "\$surface_kernel" ]; then
+        echo 'surface-kvm: kernel missing or empty'
+        return
+    fi
+    if ! [ -s "\$surface_dtb" ]; then
+        echo 'surface-kvm: EL2 DTB missing or empty'
+        return
+    fi
+    if ! [ -s "\$surface_initrd" ]; then
+        echo 'surface-kvm: initramfs missing or empty'
+        return
+    fi
+    if linux "\$surface_kernel" root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS; then
+        echo 'surface-kvm: kernel loaded'
+    else
+        echo 'surface-kvm: kernel load failed'
+        return
+    fi
+    if devicetree "\$surface_dtb"; then
+        echo 'surface-kvm: EL2 DTB loaded'
+    else
+        echo 'surface-kvm: EL2 DTB load failed'
+        return
+    fi
+    if initrd "\$surface_initrd"; then
+        echo 'surface-kvm: initramfs loaded; booting'
+    else
+        echo 'surface-kvm: initramfs load failed'
+        return
+    fi
+    boot
+    echo 'surface-kvm: boot returned without starting Linux'
+}
+
+EOF
+	local modules='part_gpt linux fdt test reboot sleep halt'
 	case "$PAYLOAD_MODE" in
 	cmdpath)
-		cat >"$CONFIG" <<EOF
-set timeout=0
-echo 'surface-kvm: starting installed KVM GRUB (EL2 clocks/power preserved + ECV)'
-echo "surface-kvm: cmdpath=\$cmdpath"
-echo 'surface-kvm: loading kernel'
-linux \$cmdpath/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
-echo 'surface-kvm: kernel loaded'
-echo 'surface-kvm: loading EL2 DTB'
-devicetree \$cmdpath/surface-laptop-13-el2.dtb
-echo 'surface-kvm: EL2 DTB loaded'
-echo 'surface-kvm: loading initramfs'
-initrd \$cmdpath/surface-kvm-initrd.img
-echo 'surface-kvm: initramfs loaded; booting'
-boot
+		cat >>"$CONFIG" <<'EOF'
+if regexp --set=1:surface_device '^(\([^)]*\))' "$cmdpath"; then
 EOF
-		modules='part_gpt fat linux fdt'
+		modules+=' fat regexp'
 		;;
 	esp)
-		cat >"$CONFIG" <<EOF
-set timeout=0
-echo 'surface-kvm: starting installed KVM GRUB (EL2 clocks/power preserved + ECV)'
-echo 'surface-kvm: selecting installed ESP'
-insmod part_gpt
-insmod fat
-insmod search_fs_uuid
-search --no-floppy --fs-uuid --set=root $ESP_UUID
-insmod linux
-insmod fdt
-linux /EFI/BOOT/surface-kvm-linux root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
-devicetree /EFI/BOOT/surface-laptop-13-el2.dtb
-initrd /EFI/BOOT/surface-kvm-initrd.img
-boot
+		cat >>"$CONFIG" <<EOF
+echo 'surface-kvm: locating ESP UUID $ESP_UUID'
+if search --no-floppy --fs-uuid --set=surface_fs $ESP_UUID; then
+    set surface_device="(\$surface_fs)"
 EOF
-		modules='part_gpt fat search_fs_uuid linux fdt'
+		modules+=' fat search search_fs_uuid'
 		;;
 	root)
-		cat >"$CONFIG" <<EOF
-set timeout=0
-insmod part_gpt
-insmod ext2
-insmod search_fs_uuid
-insmod linux
-insmod fdt
-search --no-floppy --fs-uuid --set=root $ROOT_UUID
-linux $KERNEL_PATH root=UUID=$ROOT_UUID rootfstype=ext4 rootwait rw $KERNEL_EXTRA_ARGS
-devicetree $DTB_PATH
-initrd $INITRD_PATH
-boot
+		cat >>"$CONFIG" <<EOF
+echo 'surface-kvm: locating root UUID $ROOT_UUID'
+if search --no-floppy --fs-uuid --set=surface_fs $ROOT_UUID; then
+    set surface_device="(\$surface_fs)"
 EOF
-		modules='part_gpt ext2 search_fs_uuid linux fdt'
+		modules+=' ext2 search search_fs_uuid'
 		;;
 	esac
+	emit_payload_path surface_kernel "$KERNEL_PATH" >>"$CONFIG"
+	emit_payload_path surface_dtb "$DTB_PATH" >>"$CONFIG"
+	emit_payload_path surface_initrd "$INITRD_PATH" >>"$CONFIG"
+	cat >>"$CONFIG" <<'EOF'
+    surface_kvm_boot
+else
+    echo 'surface-kvm: payload device unavailable'
+fi
+
+# Do not boot Ready in this EFI session: slbounce still owns ExitBootServices.
+echo 'surface-kvm: failed; rebooting to the saved Ready entry in 10 seconds'
+sleep 10
+reboot
+halt
+EOF
+	grub-script-check "$CONFIG"
 
 	grub-mkstandalone \
 		-d "$GRUB_MODULE_DIR" \
@@ -198,8 +276,10 @@ EOF
 		--modules="$modules" \
 		-o "$OUTPUT" \
 		"/boot/grub/grub.cfg=$CONFIG" >/dev/null
+	cp -- "$CONFIG" "${OUTPUT%.efi}.cfg"
 
 	printf 'Installed KVM GRUB: %s\n' "$OUTPUT"
+	printf 'Embedded configuration: %s\n' "${OUTPUT%.efi}.cfg"
 	file "$OUTPUT"
 	sha256sum "$OUTPUT"
 }

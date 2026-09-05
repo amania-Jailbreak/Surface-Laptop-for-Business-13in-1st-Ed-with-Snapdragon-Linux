@@ -1,7 +1,7 @@
 [Unit]
 Description=Clear the one-shot Surface EL2 fallback after a healthy KVM boot
 ConditionKernelCommandLine=id_aa64mmfr0.ecv=1
-After=network-online.target
+After=network-online.target systemd-modules-load.service
 Wants=network-online.target
 
 [Service]
@@ -10,4 +10,4 @@ ExecStart=/usr/local/sbin/surface-kvm-clear-fallback
 RemainAfterExit=yes
 
 [Install]
-WantedBy=network-online.target
+WantedBy=multi-user.target

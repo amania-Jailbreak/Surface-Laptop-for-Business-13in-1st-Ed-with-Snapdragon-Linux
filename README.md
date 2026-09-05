@@ -15,6 +15,7 @@ Tested on the actual machine:
 
 - Boot via UKI (systemd-boot) from external USB storage
 - Both USB-C ports in host mode (SSD, hub, display adapter)
+- Wi-Fi 7 (Qualcomm WCN7850 over PCIe, with the required early firmware)
 - Bluetooth (WCN7850 over UART)
 - Touchscreen (HID-over-I2C, `1FD2:4001`)
 - Fingerprint reader in the power button (`04f3:0c9e`): enrollment and
@@ -49,7 +50,8 @@ The build produces three UKIs from one kernel:
 
 - `surface-laptop-13-current.efi` - USB-C host + touchscreen, the baseline
 - `surface-laptop-13-bluetooth.efi` - same + WCN7850 UART node and early BT
-  modules/firmware in the initramfs
+  modules/firmware in the initramfs; the Wi-Fi firmware is included in both
+  initramfs variants when `WCN7850_FIRMWARE_SOURCE` is supplied
 - `surface-laptop-13-fingerprint.efi` - bluetooth baseline + internal USB host
   for the fingerprint reader
 

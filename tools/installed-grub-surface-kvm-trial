@@ -2,17 +2,38 @@
 
 # One-shot KVM trial entry for the installed Surface system.
 # Arm the known-good Ready entry before the handoff.  The fallback service
-# clears it only after an EL2 boot reaches network-online.target; an early
+# clears it only after networking is up and KVM can create a VM; an early
 # reset therefore returns to Ready exactly once.
 cat <<'GRUB_ENTRY'
 menuentry 'Proxmox VE - Surface Laptop 13 (KVM trial; fallback to ready)' --id surface-el2-kvm-trial --class debian --class gnu-linux --class gnu --class os {
     insmod part_gpt
     insmod fat
+    insmod ext2
     insmod chain
-    search --no-floppy --fs-uuid --set=esp 584B-B4D4
-    set next_entry=surface-el1-ready
-    save_env next_entry
-    chainloader ($esp)/EFI/BOOT/surface-kvm-entry.efi
-    boot
+    insmod search_fs_uuid
+    insmod loadenv
+    insmod sleep
+    insmod reboot
+    if search --no-floppy --fs-uuid --set=esp 584B-B4D4; then
+        if search --no-floppy --fs-uuid --set=surface_root f621d247-7647-4244-aad3-1fffe95afe92; then
+            set next_entry=surface-el1-ready
+            if save_env -f ($surface_root)/boot/grub/grubenv next_entry; then
+                if chainloader ($esp)/EFI/BOOT/surface-kvm-entry.efi; then
+                    boot
+                    echo 'surface-kvm: launcher returned; rebooting to Ready'
+                    sleep 5
+                    reboot
+                else
+                    echo 'surface-kvm: EFI launcher could not be loaded'
+                fi
+            else
+                echo 'surface-kvm: cannot save Ready fallback; launch cancelled'
+            fi
+        else
+            echo 'surface-kvm: Ready root filesystem not found'
+        fi
+    else
+        echo 'surface-kvm: ESP UUID 584B-B4D4 not found'
+    fi
 }
 GRUB_ENTRY

@@ -14,6 +14,6 @@ The exact settings are recorded in `drivers/kernel-config.md`. Modules needed
 before the real root is available are listed in `drivers/module-manifest.txt`.
 Firmware names and hashes are in `drivers/firmware-manifest.json`.
 
-The Bluetooth firmware files are hardware inputs, not operating-system
-packages. Check the vendor redistribution terms before putting them on a
-public hosting service.
+The WCN7850 Wi-Fi and Bluetooth firmware files are hardware inputs, not
+operating-system packages. Check the vendor redistribution terms before
+putting them on a public hosting service.

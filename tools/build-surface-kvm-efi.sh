@@ -310,40 +310,94 @@ copy_firmware_tree() {
 	done < <(find "$FIRMWARE_TREE" -type f -print0 | sort -z)
 }
 
+emit_shell_payload_check() {
+	local volume=$1 action=$2 indent= file
+	local -a required=('EFI\BOOT\slbounceaa64.efi' 'tcblaunch.exe')
+	[[ -z "$EL2_DTB" ]] || required+=('surface-laptop-13-el2.dtb')
+	[[ "$LOAD_QEBSPIL" -ne 1 ]] || required+=('EFI\BOOT\qebspilaa64.efi')
+	for file in "${required[@]}"; do
+		printf '%sif exist %s\\%s then\n' "$indent" "$volume" "$file"
+		indent+='  '
+	done
+	printf '%sif exist %s\\EFI\\BOOT\\surface-kvm-grubaa64.efi then\n' "$indent" "$volume"
+	printf '%s\n' "$action"
+	printf '%selse\n' "$indent"
+	printf '%s  if exist %s\\EFI\\BOOT\\shimaa64.efi then\n' "$indent" "$volume"
+	printf '%s    if exist %s\\EFI\\BOOT\\grubaa64.efi then\n' "$indent" "$volume"
+	printf '%s\n' "$action"
+	printf '%s    endif\n%s  endif\n%sendif\n' "$indent" "$indent" "$indent"
+	for file in "${required[@]}"; do
+		indent=${indent%  }
+		printf '%sendif\n' "$indent"
+	done
+}
+
 install_shell_path() {
 	local startup="$WORK_DIR/surface-kvm-startup.nsh"
-	local fs_index
+	local fs_index action
 
 	[[ -n "$SHELL_EFI" ]] || return 0
 	cat >"$startup" <<'EOF'
 @echo -off
 map -r
 EOF
+	# The bridge starts Shell from the selected payload volume. Prefer that
+	# current filesystem; remapped FS numbers are never a persistent identity.
+	emit_shell_payload_check '' 'goto surface_kvm_launch' >>"$startup"
+	printf 'set -v surface_kvm_found 0\n' >>"$startup"
 
 	# Some Surface firmware exposes many partition aliases before the ESP.
 	# Generate enough explicit Shell syntax to find the payload regardless of
 	# which FS alias the firmware assigned; this is more portable than relying
 	# on Shell loop syntax, which differs between Shell implementations.
 	for ((fs_index = 0; fs_index < 256; fs_index++)); do
-		cat >>"$startup" <<EOF
-if exist fs${fs_index}:\EFI\BOOT\slbounceaa64.efi then
-  fs${fs_index}:
-  goto surface_kvm_launch
-endif
-EOF
+		printf -v action 'if %%surface_kvm_found%% == 1 then\n  goto surface_kvm_ambiguous\nendif\nset -v surface_kvm_found 1\nset -v surface_kvm_volume fs%d:' "$fs_index"
+		emit_shell_payload_check "fs${fs_index}:" "$action" >>"$startup"
 	done
 
 	cat >>"$startup" <<'EOF'
 
-echo surface-kvm: EFI Shell could not find the KVM payload volume
+if %surface_kvm_found% == 1 then
+  %surface_kvm_volume%
+  goto surface_kvm_launch
+endif
+echo surface-kvm: EFI Shell could not find a complete KVM payload volume
+pause
+exit
+
+:surface_kvm_ambiguous
+echo surface-kvm: multiple complete KVM payload volumes; start the intended ESP directly
 pause
 exit
 
 :surface_kvm_launch
+EOF
+	if [[ "$LOAD_QEBSPIL" -eq 1 ]]; then
+		cat >>"$startup" <<'EOF'
+echo surface-kvm: loading qebspil from EFI Shell
+load \EFI\BOOT\qebspilaa64.efi
+if not %lasterror% == 0 then
+  goto surface_kvm_failed
+endif
+EOF
+	fi
+	cat >>"$startup" <<'EOF'
 echo surface-kvm: loading slbounce from EFI Shell
 load \EFI\BOOT\slbounceaa64.efi
+if not %lasterror% == 0 then
+  goto surface_kvm_failed
+endif
+if exist \EFI\BOOT\surface-kvm-grubaa64.efi then
+  echo surface-kvm: starting installed KVM GRUB
+  \EFI\BOOT\surface-kvm-grubaa64.efi
+  goto surface_kvm_failed
+endif
 echo surface-kvm: starting normal Proxmox shim/GRUB
 \EFI\BOOT\shimaa64.efi
+
+:surface_kvm_failed
+echo surface-kvm: boot stage returned; restart through the Ready fallback
+pause
 exit
 EOF
 

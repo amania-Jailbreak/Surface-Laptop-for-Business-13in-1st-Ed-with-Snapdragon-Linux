@@ -96,7 +96,7 @@ static void write_state(EFI_HANDLE device, CHAR8 *state)
  * GRUB can start an EFI application with a device handle that does not carry
  * EFI_SIMPLE_FILE_SYSTEM_PROTOCOL, even when the application itself came
  * from a FAT ESP.  Do not make the rest of the launcher depend on that
- * handle.  Locate the ESP which contains one of our payload files instead.
+ * handle. Locate a volume containing the complete launcher payload instead.
  */
 static EFI_STATUS volume_file_status(EFI_HANDLE device, CHAR16 *filename)
 {
@@ -123,20 +123,65 @@ static EFI_STATUS volume_file_status(EFI_HANDLE device, CHAR16 *filename)
 	return status;
 }
 
-static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *marker,
+static EFI_STATUS payload_status(EFI_HANDLE device, CHAR16 *grub_filename)
+{
+	EFI_STATUS status;
+	CHAR16 *required[] = {
+		L"\\EFI\\BOOT\\slbounceaa64.efi",
+		L"\\tcblaunch.exe",
+#ifdef SURFACE_KVM_INSTALL_DTB
+		L"\\surface-laptop-13-el2.dtb",
+#endif
+#ifdef SURFACE_KVM_START_SHELL
+		L"\\EFI\\BOOT\\surface-kvm-shell.efi",
+		L"\\startup.nsh",
+#endif
+#ifdef SURFACE_KVM_LOAD_QEBSPIL
+		L"\\EFI\\BOOT\\qebspilaa64.efi",
+#endif
+	};
+	UINTN index;
+
+	for (index = 0; index < sizeof(required) / sizeof(required[0]); index++) {
+		status = volume_file_status(device, required[index]);
+		if (EFI_ERROR(status))
+			return status;
+	}
+
+	status = volume_file_status(device, grub_filename);
+	if (status == EFI_NOT_FOUND) {
+		/* The installer image continues through the original shim. */
+		status = volume_file_status(device, L"\\EFI\\BOOT\\shimaa64.efi");
+		if (!EFI_ERROR(status))
+			status = volume_file_status(device, L"\\EFI\\BOOT\\grubaa64.efi");
+	}
+	return status;
+}
+
+static void print_device_path(CHAR16 *label, EFI_DEVICE_PATH *path)
+{
+	CHAR16 *text = path ? DevicePathToStr(path) : NULL;
+
+	Print(L"surface-kvm: %s=%s\n", label, text ? text : L"(unavailable)");
+	if (text)
+		FreePool(text);
+}
+
+static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *grub_filename,
 					      EFI_HANDLE *result)
 {
 	EFI_GUID fs_guid = EFI_SIMPLE_FILE_SYSTEM_PROTOCOL_GUID;
 	EFI_HANDLE *handles = NULL;
 	UINTN handle_count = 0;
 	UINTN index;
+	UINTN matches = 0;
 	EFI_STATUS status;
 
-	if (!marker || !result)
+	if (!grub_filename || !result)
 		return EFI_INVALID_PARAMETER;
 	*result = NULL;
 
-	if (preferred && !EFI_ERROR(volume_file_status(preferred, marker))) {
+	if (preferred && !EFI_ERROR(payload_status(preferred, grub_filename))) {
 		*result = preferred;
 		return EFI_SUCCESS;
 	}
@@ -148,11 +193,17 @@ static EFI_STATUS find_payload_device(EFI_HANDLE preferred, CHAR16 *marker,
 
 	status = EFI_NOT_FOUND;
 	for (index = 0; index < handle_count; index++) {
-		if (!EFI_ERROR(volume_file_status(handles[index], marker))) {
+		if (!EFI_ERROR(payload_status(handles[index], grub_filename))) {
 			*result = handles[index];
-			status = EFI_SUCCESS;
-			break;
+			matches++;
 		}
+	}
+	if (matches == 1) {
+		status = EFI_SUCCESS;
+	} else if (matches > 1) {
+		*result = NULL;
+		Print(L"surface-kvm: multiple complete payload volumes; start the launcher directly from the intended ESP\n");
+		status = EFI_NO_MAPPING;
 	}
 
 	if (handles)
@@ -248,6 +299,7 @@ static EFI_STATUS start_image_from_volume(EFI_HANDLE parent,
 	path = FileDevicePath(device, filename);
 	if (!path)
 		return EFI_OUT_OF_RESOURCES;
+	print_device_path(L"loading EFI image", path);
 
 	status = uefi_call_wrapper(BS->LoadImage, 6, FALSE, parent, path,
 					   NULL, 0, &child);
@@ -274,7 +326,7 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	EFI_LOADED_IMAGE *loaded_image = NULL;
 	EFI_HANDLE device = NULL;
 	EFI_STATUS status;
-	CHAR16 *payload_marker = L"\\EFI\\BOOT\\slbounceaa64.efi";
+	CHAR16 *grub_filename = L"\\EFI\\BOOT\\surface-kvm-grubaa64.efi";
 
 	InitializeLib(image, system_table);
 
@@ -285,17 +337,16 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 		Print(L"surface-kvm: cannot locate the boot volume: %r\n", status);
 		return EFI_ERROR(status) ? status : EFI_NOT_FOUND;
 	}
-#ifdef SURFACE_KVM_START_SHELL
-	payload_marker = L"\\EFI\\BOOT\\surface-kvm-shell.efi";
-#elif defined(SURFACE_KVM_INSTALL_DTB)
-	payload_marker = L"\\surface-laptop-13-el2.dtb";
-#endif
-	status = find_payload_device(loaded_image->DeviceHandle, payload_marker,
+	if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-terminal"))
+		grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-terminal.efi";
+	print_device_path(L"launcher device", DevicePathFromHandle(loaded_image->DeviceHandle));
+	status = find_payload_device(loaded_image->DeviceHandle, grub_filename,
 					     &device);
 	if (EFI_ERROR(status)) {
 		Print(L"surface-kvm: payload volume not found: %r\n", status);
 		return status;
 	}
+	print_device_path(L"selected payload device", DevicePathFromHandle(device));
 
 #ifdef SURFACE_KVM_START_SHELL
 	/*
@@ -364,9 +415,6 @@ EFI_STATUS efi_main(EFI_HANDLE image, EFI_SYSTEM_TABLE *system_table)
 	 */
 	write_state(device, (CHAR8 *)"grub-start\n");
 	Print(L"surface-kvm: Secure Launch hook installed; looking for KVM GRUB...\n");
-	CHAR16 *grub_filename = L"\\EFI\\BOOT\\surface-kvm-grubaa64.efi";
-	if (path_contains(loaded_image->FilePath, L"surface-kvm-entry-terminal"))
-		grub_filename = L"\\EFI\\BOOT\\surface-kvm-grub-terminal.efi";
 	status = start_image_from_volume(image, device,
 					 grub_filename);
 	if (status == EFI_NOT_FOUND) {

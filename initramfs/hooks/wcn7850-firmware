@@ -1,0 +1,29 @@
+#!/bin/sh
+
+# initramfs-tools hook for the Qualcomm WCN7850 Wi-Fi device.
+# The ath12k driver is built into the Surface kernel, but the PCI device
+# cannot start until this platform's firmware tree is available in initramfs.
+
+set -e
+
+PREREQ=""
+
+prereqs()
+{
+	printf '%s\n' "$PREREQ"
+}
+
+case "${1:-}" in
+	prereqs)
+		prereqs
+		exit 0
+		;;
+esac
+
+. /usr/share/initramfs-tools/hook-functions
+
+firmware_source=/lib/firmware/ath12k/WCN7850/hw2.0
+firmware_destination="${DESTDIR}${firmware_source}"
+
+mkdir -p "$firmware_destination"
+cp -a "$firmware_source"/. "$firmware_destination"/

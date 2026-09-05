@@ -1,5 +1,37 @@
 {
   "files": {
+    "ath12k/WCN7850/hw2.0/Notice.txt": {
+      "bytes": 142991,
+      "sha256": "515bf4c9d620a87458e4447fe01a0e9bc384d1c3e0037cc4c3d2037b1ff25525"
+    },
+    "ath12k/WCN7850/hw2.0/amss.bin": {
+      "bytes": 6082624,
+      "sha256": "74f2ffde049d523cba7bc7660f4d9806110bbe1d1ecac9565f50028652a861f3"
+    },
+    "ath12k/WCN7850/hw2.0/board-2.bin": {
+      "bytes": 2253964,
+      "sha256": "1abee7132dbccb523cca44a8de4e8968aa7bf5a5fcc032c338f687f94ea5bf4e"
+    },
+    "ath12k/WCN7850/hw2.0/board.bin": {
+      "bytes": 88780,
+      "sha256": "b24438910ff0383d299798a997d3ef3484be624ac013aec2ce7939ec32900c4f"
+    },
+    "ath12k/WCN7850/hw2.0/m3.bin": {
+      "bytes": 299660,
+      "sha256": "0e72f44df7defc269fe92dcea25d4d409046c04b77d41c510c52879b3dfc1055"
+    },
+    "ath12k/WCN7850/hw2.0/ncm865/Notice.txt": {
+      "bytes": 142991,
+      "sha256": "515bf4c9d620a87458e4447fe01a0e9bc384d1c3e0037cc4c3d2037b1ff25525"
+    },
+    "ath12k/WCN7850/hw2.0/ncm865/amss.bin": {
+      "bytes": 6111296,
+      "sha256": "ffbcccbdfb19402b734132544d30c4c6dd940e71fe6c530ac11e9c6f494b3477"
+    },
+    "ath12k/WCN7850/hw2.0/ncm865/m3.bin": {
+      "bytes": 299660,
+      "sha256": "0e72f44df7defc269fe92dcea25d4d409046c04b77d41c510c52879b3dfc1055"
+    },
     "hmtbtfw20.tlv": {
       "bytes": 280652,
       "sha256": "2ef1f0fa991a53d8da4857093b6fb91d0d7aa5f9504b01b6b522fba4fc2e6b7c"
@@ -33,6 +65,6 @@
       "sha256": "facca00c7cbc988d843776f8b8f8f7926f24007a1cfc540d2219a005f596114f"
     }
   },
-  "note": "Qualcomm WCN7850 Bluetooth firmware hashes. Binary files are NOT distributed in this repository; obtain them from your OS vendor or an existing installation and verify these hashes before use.",
+  "note": "Qualcomm WCN7850 Wi-Fi and Bluetooth firmware hashes. Binary files are NOT distributed in this repository; obtain them from your OS vendor or an existing installation and verify these hashes before use.",
   "schema": 1
 }

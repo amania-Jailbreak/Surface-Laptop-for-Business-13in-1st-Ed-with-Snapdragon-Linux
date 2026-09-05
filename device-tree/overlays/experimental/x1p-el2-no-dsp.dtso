@@ -1,0 +1,13 @@
+// SPDX-License-Identifier: BSD-3-Clause
+/dts-v1/;
+/plugin/;
+
+/* Diagnostic for the SID 0x1000 apps-SMMU fault storm seen in EL2.
+ * The current kernel lacks the detached-DSP attach implementation. Prevent
+ * remoteproc probing from assigning a fresh untranslated domain to a running
+ * firmware DSP. This disables DSP/audio functionality, not the apps SMMU.
+ * Hardware validation is required; this is not the default EL2 overlay.
+ */
+&{/soc@0/remoteproc@6800000} { status = "disabled"; };
+&{/soc@0/remoteproc@32300000} { status = "disabled"; };
+&{/sound} { status = "disabled"; };
